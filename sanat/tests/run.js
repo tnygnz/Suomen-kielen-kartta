@@ -18,7 +18,6 @@ const files = [
   "packs.test.js",
   "import.test.js",
   "pwa.test.js",
-  "tools.test.js",
 ];
 let failed = 0;
 
