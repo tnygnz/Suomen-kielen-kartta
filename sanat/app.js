@@ -900,6 +900,16 @@ const state = {
   coach: { tab: 'dialog', scenario: 0, turn: 0, picked: null, showTr: false, hint: false, key: '', options: [] },
   pron: { index: 0, heard: '', heardOk: false },
   immerse: { index: 0, showTr: false },
+  tools: {
+    open: false,
+    tab: 'grammar',
+    cardIndex: 0,
+    cardFlipped: false,
+    quizIndex: 0,
+    quizPicked: null,
+    quizScore: 0,
+    quizDone: false,
+  },
 };
 
 function announce(message) {
@@ -948,6 +958,7 @@ function startSession(week, options) {
   state.token = null;
   state.hub = false;
   state.summary = false;
+  state.tools.open = false;
   clearSpeed();
 }
 
@@ -1143,6 +1154,10 @@ function setRegister(mode) {
 function renderStudy() {
   const el = document.getElementById('view-study');
   if (!el) return;
+  if (state.tools.open) {
+    renderTools();
+    return;
+  }
   if (state.hub) {
     renderHub();
     return;
@@ -1514,6 +1529,10 @@ function renderPath() {
       <p class="kicker">${markGlyph()}<span>Ünite haritası</span></p>
       <h1 class="view-title">Yolculuk</h1>
       <p class="lede">16 ünite, 68 kademe. Her ünitede kelimeler, diyalog, dilbilgisi röntgeni ve ünite sınavı; ilerleme SM-2 takvimine bağlı kalır.</p>
+      <div class="path-tools">
+        <button class="btn btn--quiet btn--tight" type="button" data-act="tools" data-tool="grammar">Gramer rehberi</button>
+        <button class="btn btn--quiet btn--tight" type="button" data-act="tools" data-tool="quiz">Mini alıştırma</button>
+      </div>
       <div class="journey-top">
         ${streakRingHtml()}
         <div class="journey-side">
@@ -1711,6 +1730,26 @@ function renderHub() {
         <button class="btn btn--primary btn--tight" type="button" data-act="mode-summary">Özeti aç</button>
       </li>
     </ul>
+    <section class="tool-shelf" aria-label="Çalışma araçları">
+      <p class="tool-shelf-title">Çalışma araçları</p>
+      <div class="tool-shelf-grid">
+        <button class="tool-tile" type="button" data-act="tools" data-tool="cards">
+          <span class="tool-icon">${STEP_ICONS.words}</span>
+          <b>Kelime Kartları</b>
+          <span>Haftanın kelimelerini çevir, dinle.</span>
+        </button>
+        <button class="tool-tile" type="button" data-act="tools" data-tool="grammar">
+          <span class="tool-icon">${STEP_ICONS.grammar}</span>
+          <b>Gramer Rehberi</b>
+          <span>Kuralı oku, tabloda örneği gör.</span>
+        </button>
+        <button class="tool-tile" type="button" data-act="tools" data-tool="quiz">
+          <span class="tool-icon">${STEP_ICONS.quiz}</span>
+          <b>Mini Alıştırma</b>
+          <span>İki soruluk hızlı ölçüm.</span>
+        </button>
+      </div>
+    </section>
     <button class="btn btn--quiet" type="button" data-act="hub-close">Karta dön</button>
   </div>`;
 }
@@ -1747,6 +1786,258 @@ function renderSummary() {
       <button class="btn btn--quiet" type="button" data-act="summary-close">Karta dön</button>
     </div>
   </article>`;
+}
+
+/* ---------------- Çalışma araçları: gramer, kart, alıştırma ----------------
+   Oturum merkezinden açılan hafif katman. Gramer ve alıştırma verisi data.js'te
+   durur; kartlar mevcut ALL_CARDS destesini kullanır. Böylece ikinci bir kelime
+   listesi ve ikinci bir SM-2 kaydı oluşmaz. */
+
+function toolQuestions() {
+  return typeof QUIZ_QUESTIONS === 'undefined' ? [] : QUIZ_QUESTIONS;
+}
+
+function toolDeck() {
+  const module = moduleFor(state.week) || MODULES[0];
+  const words = module.cards.filter((card) => card.type === 'kelime');
+  return (words.length ? words : module.cards).slice();
+}
+
+function resetToolQuiz() {
+  state.tools.quizIndex = 0;
+  state.tools.quizPicked = null;
+  state.tools.quizScore = 0;
+  state.tools.quizDone = false;
+}
+
+function openTools(tab) {
+  clearSpeed();
+  state.tools.open = true;
+  state.tools.tab = tab === 'cards' || tab === 'quiz' ? tab : 'grammar';
+  state.tools.cardFlipped = false;
+  if (state.tools.tab === 'cards') state.tools.cardIndex = 0;
+  if (state.tools.tab === 'quiz') resetToolQuiz();
+  state.hub = false;
+  state.summary = false;
+  setView('study', { silent: true });
+  announce(
+    `${state.tools.tab === 'cards' ? 'Kelime kartları' : state.tools.tab === 'quiz' ? 'Mini alıştırma' : 'Gramer rehberi'} açıldı`,
+  );
+}
+
+function grammarPaneHtml() {
+  const topics = typeof GRAMMAR_GUIDE === 'undefined' ? [] : GRAMMAR_GUIDE;
+  if (!topics.length) return '<p class="empty">Gramer içeriği yüklenemedi.</p>';
+  return `<div class="grammar-list">${topics
+    .map((topic, index) => {
+      const head = (topic.headers || []).map((header) => `<th scope="col">${esc(header)}</th>`).join('');
+      const rows = (topic.rows || [])
+        .map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join('')}</tr>`)
+        .join('');
+      return `<details class="grammar-item"${index === 0 ? ' open' : ''}>
+        <summary>
+          <span class="grammar-idx">${pad2(index + 1)}</span>
+          <span class="grammar-head">
+            <span class="grammar-level">${esc(topic.level)}</span>
+            <b>${esc(topic.title)}</b>
+            <span class="grammar-summary">${esc(topic.summary)}</span>
+          </span>
+          <span class="grammar-chevron">${CHEVRON_ICON}</span>
+        </summary>
+        <div class="grammar-body">
+          <div class="grammar-table-wrap">
+            <table class="grammar-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
+          </div>
+          <div class="tool-actions">
+            <button class="btn btn--primary btn--tight" type="button" data-act="tool-tab" data-tool="cards">Kartlarda dene</button>
+            <button class="btn btn--tight" type="button" data-act="tool-tab" data-tool="quiz">Mini alıştırma</button>
+          </div>
+        </div>
+      </details>`;
+    })
+    .join('')}</div>`;
+}
+
+function cardsPaneHtml() {
+  const module = moduleFor(state.week) || MODULES[0];
+  const words = module.cards.filter((card) => card.type === 'kelime');
+  const deck = words.length ? words : module.cards;
+  if (!deck.length) return '<p class="empty">Bu modülde kart yok.</p>';
+  const index = ((state.tools.cardIndex % deck.length) + deck.length) % deck.length;
+  state.tools.cardIndex = index;
+  const card = deck[index];
+  const flipped = Boolean(state.tools.cardFlipped);
+  const shown = displayFi(card.fi);
+  const listen = speechAvailable()
+    ? `<button class="btn btn--tight" type="button" data-act="tool-speak" data-rate="0.75">Dinle · 0,75×</button>
+       <button class="btn btn--tight" type="button" data-act="tool-speak" data-rate="1">Dinle · 1,0×</button>`
+    : '';
+  return `<article class="tool-flash">
+    <div class="flash-meta">
+      <span class="tool-badge">Hafta ${pad2(module.id)} · Kelimeler</span>
+      <span class="flash-count">${pad2(index + 1)} / ${pad2(deck.length)}</span>
+    </div>
+    <button class="flash-face" type="button" data-act="tool-flip" aria-pressed="${flipped}" aria-label="Kartı çevir">
+      <span class="flash-label">${flipped ? 'Türkçe' : 'Fince'}</span>
+      <span class="flash-word">${esc(flipped ? card.tr : shown)}</span>
+      ${
+        flipped
+          ? `<span class="flash-note">${card.note ? esc(card.note) : 'Anlam ve örnek bağlam'}</span>`
+          : '<span class="flash-hint">Anlamı görmek için karta dokun</span>'
+      }
+    </button>
+    <div class="flash-actions">
+      ${listen}
+      <button class="btn btn--primary btn--tight" type="button" data-act="tool-flip">${
+        flipped ? 'Finceyi göster' : 'Anlamı göster'
+      }</button>
+    </div>
+    <div class="flash-nav">
+      <button class="btn btn--quiet btn--tight" type="button" data-act="tool-card-prev">← Önceki</button>
+      <button class="btn btn--quiet btn--tight" type="button" data-act="tool-card-next">Sonraki →</button>
+    </div>
+  </article>`;
+}
+
+function quizPaneHtml() {
+  const questions = toolQuestions();
+  if (!questions.length) return '<p class="empty">Alıştırma içeriği yüklenemedi.</p>';
+  const total = questions.length;
+  if (state.tools.quizDone) {
+    return `<article class="quiz-card quiz-result">
+      <p class="tool-badge">Mini alıştırma · tamamlandı</p>
+      <p class="quiz-score">${state.tools.quizScore} / ${total}</p>
+      <p>${state.tools.quizScore === total ? 'Hepsi doğru. Kurallar oturdu.' : 'Açıklamaları tekrar okuyup bir tur daha dene.'}</p>
+      <div class="quiz-track"><span style="width:100%"></span></div>
+      <div class="tool-actions">
+        <button class="btn btn--primary btn--tight" type="button" data-act="tool-quiz-restart">Baştan başla</button>
+        <button class="btn btn--tight" type="button" data-act="tool-tab" data-tool="grammar">Gramer rehberine dön</button>
+      </div>
+    </article>`;
+  }
+  const index = Math.min(Math.max(0, state.tools.quizIndex || 0), total - 1);
+  state.tools.quizIndex = index;
+  const question = questions[index];
+  const picked = state.tools.quizPicked;
+  const answered = picked != null;
+  const correct = answered && picked === question.answer;
+  const options = question.options
+    .map((option, optionIndex) => {
+      const isCorrect = answered && optionIndex === question.answer;
+      const isWrong = answered && optionIndex === picked && !isCorrect;
+      return `<button class="quiz-option${isCorrect ? ' is-correct' : ''}${
+        isWrong ? ' is-wrong' : ''
+      }" type="button" data-act="tool-answer" data-opt="${optionIndex}"${
+        answered ? ' disabled' : ''
+      } aria-pressed="${picked === optionIndex}">
+        <span class="quiz-letter">${String.fromCharCode(65 + optionIndex)}</span>
+        <span>${esc(option)}</span>
+      </button>`;
+    })
+    .join('');
+  const progress = Math.round(((index + (answered ? 1 : 0)) / total) * 100);
+  const last = index + 1 >= total;
+  return `<article class="quiz-card">
+    <div class="quiz-meta">
+      <span class="tool-badge">Soru ${pad2(index + 1)} / ${pad2(total)}</span>
+      <span class="quiz-score-small">Puan ${state.tools.quizScore}</span>
+    </div>
+    <div class="quiz-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div>
+    <p class="quiz-q">${esc(question.question)}</p>
+    <div class="quiz-options" role="group" aria-label="Seçenekler">${options}</div>
+    ${
+      answered
+        ? `<div class="quiz-feedback ${correct ? 'is-ok' : 'is-bad'}" role="status">
+            <b>${correct ? 'Doğru!' : 'Yanlış.'}</b>
+            <span>${correct ? '' : `Doğru cevap: ${esc(question.options[question.answer])} `}${esc(
+              question.explanation,
+            )}</span>
+          </div>`
+        : ''
+    }
+    <div class="quiz-foot">
+      <span class="quiz-help">${answered ? 'Açıklamayı okuyup devam et.' : 'Bir seçenek seç.'}</span>
+      ${
+        answered
+          ? `<button class="btn btn--primary btn--tight" type="button" data-act="tool-quiz-next">${
+              last ? 'Sonucu gör' : 'Sonraki soru'
+            } →</button>`
+          : ''
+      }
+    </div>
+  </article>`;
+}
+
+function moveToolCard(delta) {
+  const deck = toolDeck();
+  if (!deck.length) return;
+  state.tools.cardIndex =
+    (((state.tools.cardIndex || 0) + delta) % deck.length + deck.length) % deck.length;
+  state.tools.cardFlipped = false;
+  renderTools();
+}
+
+function flipToolCard() {
+  state.tools.cardFlipped = !state.tools.cardFlipped;
+  renderTools();
+}
+
+function answerToolQuiz(optionIndex) {
+  const questions = toolQuestions();
+  if (!questions.length || state.tools.quizPicked != null || state.tools.quizDone) return;
+  const index = Math.min(Math.max(0, state.tools.quizIndex || 0), questions.length - 1);
+  const question = questions[index];
+  if (!question || optionIndex < 0 || optionIndex >= question.options.length) return;
+  state.tools.quizPicked = optionIndex;
+  if (optionIndex === question.answer) {
+    state.tools.quizScore = (state.tools.quizScore || 0) + 1;
+  }
+  renderTools();
+  announce(optionIndex === question.answer ? 'Doğru cevap' : 'Yanlış cevap');
+}
+
+function nextToolQuiz() {
+  const questions = toolQuestions();
+  if (!questions.length || state.tools.quizPicked == null) return;
+  if (state.tools.quizIndex + 1 >= questions.length) {
+    state.tools.quizDone = true;
+  } else {
+    state.tools.quizIndex += 1;
+    state.tools.quizPicked = null;
+  }
+  renderTools();
+}
+
+function renderTools() {
+  const el = document.getElementById('view-study');
+  if (!el) return;
+  const tab = state.tools.tab === 'cards' || state.tools.tab === 'quiz' ? state.tools.tab : 'grammar';
+  state.tools.tab = tab;
+  const tabs = [
+    ['grammar', 'Gramer'],
+    ['cards', 'Kartlar'],
+    ['quiz', 'Alıştırma'],
+  ]
+    .map(
+      ([key, label]) =>
+        `<button type="button" role="tab" data-act="tool-tab" data-tool="${key}" aria-selected="${tab === key}" aria-controls="toolPane">${label}</button>`,
+    )
+    .join('');
+  const pane = tab === 'cards' ? cardsPaneHtml() : tab === 'quiz' ? quizPaneHtml() : grammarPaneHtml();
+  el.innerHTML = `<div class="tools">
+    <div class="tools-head">
+      <button class="icon-btn" type="button" data-act="tools-back" aria-label="Oturum merkezine dön">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <div class="tools-head-text">
+        <p class="kicker"><span>02 · Oturum</span><span>Çalışma araçları</span></p>
+        <h1 class="view-title">Gramer &amp; Pratik</h1>
+      </div>
+    </div>
+    <p class="lede">Kuralları oku, kartları çevir, kısa bir turla ölç. Kartlar oturumdaki 328 kartlık desteyi kullanır; alıştırma SM-2 kaydına yazmaz.</p>
+    <div class="tool-tabs" role="tablist" aria-label="Çalışma araçları">${tabs}</div>
+    <div class="tool-pane" id="toolPane" role="tabpanel">${pane}</div>
+  </div>`;
 }
 
 /* ---------------- AI Koç: diyalog, telaffuz, röntgen ---------------- */
@@ -2183,10 +2474,66 @@ function importBackup(file) {
 }
 
 function runAction(action, node) {
+  if (action === 'tools') {
+    openTools(node && node.dataset.tool);
+    return;
+  }
+  if (action === 'tools-back') {
+    state.tools.open = false;
+    state.hub = true;
+    state.summary = false;
+    renderStudy();
+    announce('Oturum merkezi');
+    return;
+  }
+  if (action === 'tool-tab') {
+    state.tools.tab = node && (node.dataset.tool === 'cards' || node.dataset.tool === 'quiz')
+      ? node.dataset.tool
+      : 'grammar';
+    state.tools.cardFlipped = false;
+    renderTools();
+    announce(`${state.tools.tab === 'cards' ? 'Kartlar' : state.tools.tab === 'quiz' ? 'Alıştırma' : 'Gramer'} sekmesi`);
+    return;
+  }
+  if (action === 'tool-flip') {
+    flipToolCard();
+    announce(state.tools.cardFlipped ? 'Kart çevrildi' : 'Kart ön yüzü');
+    return;
+  }
+  if (action === 'tool-card-prev') {
+    moveToolCard(-1);
+    return;
+  }
+  if (action === 'tool-card-next') {
+    moveToolCard(1);
+    return;
+  }
+  if (action === 'tool-speak') {
+    const deck = toolDeck();
+    if (!deck.length) return;
+    const card = deck[state.tools.cardIndex % deck.length];
+    if (card) speakText(displayFi(card.fi), Number(node.dataset.rate) || 1);
+    return;
+  }
+  if (action === 'tool-answer') {
+    answerToolQuiz(Number(node.dataset.opt));
+    return;
+  }
+  if (action === 'tool-quiz-next') {
+    nextToolQuiz();
+    return;
+  }
+  if (action === 'tool-quiz-restart') {
+    resetToolQuiz();
+    renderTools();
+    announce('Mini alıştırma baştan başladı');
+    return;
+  }
   if (action === 'hub') {
     clearSpeed();
     state.hub = true;
     state.summary = false;
+    state.tools.open = false;
     setView('study', { silent: true });
     announce('Oturum merkezi');
     return;
@@ -2194,6 +2541,7 @@ function runAction(action, node) {
   if (action === 'hub-close') {
     state.hub = false;
     state.summary = false;
+    state.tools.open = false;
     if (!state.session || (!state.session.queue.length && !state.session.done)) {
       startSession(state.week);
     }
@@ -2562,10 +2910,38 @@ function setTheme(theme) {
 
 function onKeyDown(event) {
   if (state.view !== 'study') return;
-  if (state.hub || state.summary) return;
   const target = event.target;
   const tag = target && target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  if (state.tools.open) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      state.tools.open = false;
+      state.hub = true;
+      renderStudy();
+      announce('Oturum merkezi');
+      return;
+    }
+    if (state.tools.tab === 'cards') {
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        moveToolCard(1);
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        moveToolCard(-1);
+      } else if (
+        (event.key === ' ' || event.key === 'Enter') &&
+        (!target || !target.closest || !target.closest('button'))
+      ) {
+        event.preventDefault();
+        flipToolCard();
+      }
+    }
+    return;
+  }
+
+  if (state.hub || state.summary) return;
 
   if (event.key === 'Enter' || event.key === ' ') {
     if (target && target.closest && target.closest('button')) return;
@@ -2691,5 +3067,15 @@ if (typeof globalThis !== 'undefined') {
     speechAvailable,
     REGISTERS,
     progressSettings: progress.settings,
+    GRAMMAR_GUIDE,
+    QUIZ_QUESTIONS,
+    openTools,
+    renderTools,
+    toolDeck,
+    moveToolCard,
+    flipToolCard,
+    answerToolQuiz,
+    nextToolQuiz,
+    resetToolQuiz,
   };
 }

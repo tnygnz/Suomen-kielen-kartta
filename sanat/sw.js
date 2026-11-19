@@ -4,7 +4,7 @@
    activate eski önbellekleri siler. Gezinme istekleri network-first
    (yeni sürüm hemen görünsün), geri kalanı cache-first. */
 
-const CACHE_NAME = 'suomi-kartat-v4';
+const CACHE_NAME = 'suomi-kartat-v5';
 const CORE = [
   './',
   './index.html',
