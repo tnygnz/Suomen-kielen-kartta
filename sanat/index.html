@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Suomi Kartat — Morfoloji &amp; Dil Stüdyosu</title>
+    <title>Suomi Kartat Pro Studio — Yolculuk, Oturum, Sözlük</title>
     <meta
       name="description"
-      content="Fince için editoryal arayüzlü, SM-2 aralıklı tekrar ve kart üzerinde canlı kök–ek röntgeni."
+      content="Suomi Kartat Pro Studio: on altı modüllük Fince yolculuğu, dört oturum modu, aranabilir sözlük, diyalog koçu ve bağlam içi okuma."
     />
     <meta name="theme-color" content="#F7F5F0" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=70b3532b" />
+    <link rel="stylesheet" href="styles.css?v=6b4cad4c" />
   </head>
   <body data-theme="linen">
     <a class="skip" href="#studyo">İçeriğe geç</a>
@@ -18,8 +18,14 @@
     <div class="shell">
       <header class="masthead">
         <p class="brand">
-          <span class="brand-name">Suomi Kartat</span>
-          <span class="brand-sub">Morfoloji &amp; Dil Stüdyosu</span>
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+            <path d="M8 1.4 14.6 8 8 14.6 1.4 8Z" />
+            <path d="M8 5.2v5.6M6.2 8.8 8 10.6l1.8-1.8" />
+          </svg>
+          <span class="brand-text">
+            <span class="brand-name">Suomi Kartat</span>
+            <span class="brand-sub">Pro Studio · Morfoloji &amp; Dil</span>
+          </span>
         </p>
         <p class="mast-meta">
           <span id="mastStreak">seri —</span>
@@ -32,14 +38,22 @@
       <div class="rail" id="weekRail" role="group" aria-label="Haftalık ilerleme çizgisi"></div>
 
       <main id="studyo" class="views" tabindex="-1">
-        <section class="view" id="view-study" data-panel="study" aria-label="Çalışma"></section>
+        <!-- 01 · Yolculuk -->
+        <section class="view" id="view-path" data-panel="path" aria-label="Yolculuk" hidden></section>
 
-        <section class="view" id="view-index" data-panel="index" aria-label="Dizin" hidden>
-          <h1 class="view-title">Dizin</h1>
-          <p class="lede">
-            On altı hafta, 328 kart. Bir haftayı seç ya da sözlükte aradığın biçimi
-            laboratuvarda aç.
-          </p>
+        <!-- 02 · Oturum -->
+        <section class="view" id="view-study" data-panel="study" aria-label="Oturum"></section>
+
+        <!-- 03 · Sözlük -->
+        <section class="view" id="view-index" data-panel="index" aria-label="Sözlük" hidden>
+          <div class="view-head">
+            <p class="kicker"><span>03 · Sözlük</span></p>
+            <h1 class="view-title">Sözlük</h1>
+            <p class="lede">
+              328 kartın tamamı; Fince ya da Türkçe ara, yıldızla kendi listene al,
+              kendi kartını ekle. Aradığın biçimi laboratuvarda açmak için dokun.
+            </p>
+          </div>
           <label class="field">
             <span class="sr-only">Fince veya Türkçe ara</span>
             <input
@@ -50,56 +64,101 @@
               spellcheck="false"
             />
           </label>
+          <div class="dict-filters" id="dictFilters" role="group" aria-label="Sözlük süzgeci">
+            <button type="button" class="filter" data-filter="all" aria-pressed="true">Tümü</button>
+            <button type="button" class="filter" data-filter="fav" aria-pressed="false">Kelimelerim</button>
+            <button type="button" class="filter" data-filter="kelime" aria-pressed="false">Kelimeler</button>
+            <button type="button" class="filter" data-filter="lause" aria-pressed="false">Cümleler</button>
+            <button type="button" class="filter" data-filter="mine" aria-pressed="false">Kendi kartlarım</button>
+          </div>
+          <form class="custom-form" id="customForm" autocomplete="off">
+            <p class="form-title">Kendi kartın</p>
+            <label class="field field--inline">
+              <span class="sr-only">Fince</span>
+              <input id="customFi" type="text" placeholder="Fince" spellcheck="false" required />
+            </label>
+            <label class="field field--inline">
+              <span class="sr-only">Türkçe</span>
+              <input id="customTr" type="text" placeholder="Türkçe" required />
+            </label>
+            <button class="btn btn--primary btn--tight" type="submit" data-act="add-custom">Ekle</button>
+            <button class="btn btn--tight" type="button" data-act="export-custom">Dışa aktar</button>
+          </form>
           <div id="indexBody"></div>
         </section>
 
-        <section class="view" id="view-lab" data-panel="lab" aria-label="Morfoloji laboratuvarı" hidden>
-          <h1 class="view-title">Laboratuvar</h1>
-          <p class="lede">
-            Herhangi bir Fince biçim yaz: kök, ek, ünlü uyumu ve ünsüz yumuşaması
-            yazarken çözülür.
-          </p>
-          <label class="field">
-            <span class="sr-only">Fince kelime veya cümle</span>
-            <input
-              id="labInput"
-              type="text"
-              placeholder="kaupungissani"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </label>
-          <div class="chips" id="labChips"></div>
-          <div class="lab-out" id="labOut" aria-live="polite"></div>
+        <!-- 04 · AI Koç -->
+        <section class="view" id="view-lab" data-panel="lab" aria-label="AI Koç" hidden>
+          <div class="view-head">
+            <p class="kicker"><span>04 · AI Koç</span></p>
+            <h1 class="view-title">AI Koç</h1>
+            <p class="lede">
+              Bu haftanın cümleleriyle diyalog kur, sesli okumayı 0,75× ve 1,0× ile
+              çalış, takıldığın biçimi röntgene yatır.
+            </p>
+          </div>
+          <div class="segmented" id="coachTabs" role="tablist" aria-label="Koç araçları">
+            <button type="button" role="tab" data-coach="dialog" aria-selected="true">Diyalog</button>
+            <button type="button" role="tab" data-coach="pron" aria-selected="false">Telaffuz</button>
+            <button type="button" role="tab" data-coach="lab" aria-selected="false">Röntgen</button>
+          </div>
+
+          <div class="coach-pane" data-pane="dialog">
+            <div id="dialogBody"></div>
+          </div>
+
+          <div class="coach-pane" data-pane="pron" hidden>
+            <div id="pronBody"></div>
+          </div>
+
+          <div class="coach-pane" data-pane="lab" hidden>
+            <label class="field">
+              <span class="sr-only">Fince kelime veya cümle</span>
+              <input
+                id="labInput"
+                type="text"
+                placeholder="kaupungissani"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </label>
+            <div class="chips" id="labChips"></div>
+            <div class="lab-out" id="labOut" aria-live="polite"></div>
+          </div>
         </section>
 
-        <section class="view" id="view-ledger" data-panel="ledger" aria-label="Kayıt" hidden></section>
+        <!-- 05 · Dalma -->
+        <section class="view" id="view-immerse" data-panel="immerse" aria-label="Dalma" hidden></section>
       </main>
 
       <nav class="dock" id="dock" aria-label="Ana bölümler">
-        <button type="button" data-tab="study" aria-current="page">
+        <button type="button" data-tab="path">
           <span class="dock-num">01</span>
-          <span class="dock-label">Çalış</span>
+          <span class="dock-label">Yolculuk</span>
+        </button>
+        <button type="button" data-tab="study" aria-current="page">
+          <span class="dock-num">02</span>
+          <span class="dock-label">Oturum</span>
         </button>
         <button type="button" data-tab="index">
-          <span class="dock-num">02</span>
-          <span class="dock-label">Dizin</span>
+          <span class="dock-num">03</span>
+          <span class="dock-label">Sözlük</span>
         </button>
         <button type="button" data-tab="lab">
-          <span class="dock-num">03</span>
-          <span class="dock-label">Laboratuvar</span>
-        </button>
-        <button type="button" data-tab="ledger">
           <span class="dock-num">04</span>
-          <span class="dock-label">Kayıt</span>
+          <span class="dock-label">AI Koç</span>
+        </button>
+        <button type="button" data-tab="immerse">
+          <span class="dock-num">05</span>
+          <span class="dock-label">Dalma</span>
         </button>
       </nav>
     </div>
 
     <p id="srStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
 
-    <script src="data.js?v=70b3532b"></script>
-    <script src="app.js?v=70b3532b"></script>
+    <script src="data.js?v=6b4cad4c"></script>
+    <script src="app.js?v=6b4cad4c"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

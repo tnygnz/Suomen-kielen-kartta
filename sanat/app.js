@@ -7,7 +7,8 @@
    Katman 2  : canlı kök & ek röntgeni — karttaki her kelime ve laboratuvar.
    ------------------------------------------------------------------ */
 
-const STORE_KEY = 'suomi-kartat-v1';
+const STORE_KEY = 'suomi-kartat-v2';
+const LEGACY_STORE_KEYS = ['suomi-kartat-v1'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 const SESSION_LIMIT = 30;
@@ -16,8 +17,11 @@ const DEFAULT_GOAL = 20;
 const GRADE_LABELS = ['Tekrar', 'Zor', 'İyi', 'Kolay'];
 const THEMES = { linen: 'Sıcak Keten', fjord: 'Gece Fiyordu' };
 const REGISTERS = { kirja: 'Kirjakieli', puhe: 'Puhekieli' };
-const VIEW_NAMES = { study: 'Çalış', index: 'Dizin', lab: 'Laboratuvar', ledger: 'Kayıt' };
-const VIEW_LIST = ['study', 'index', 'lab', 'ledger'];
+const VIEW_NAMES = { path: 'Yolculuk', study: 'Oturum', index: 'Sözlük', lab: 'AI Koç', immerse: 'Dalma' };
+const VIEW_LIST = ['path', 'study', 'index', 'lab', 'immerse'];
+const SPEED_MS = 8000;
+const SPEED_LIMIT = 10;
+const HARD_LIMIT = 12;
 
 /* ---------------- Depolama ---------------- */
 
@@ -42,6 +46,8 @@ function writeStore(key, value) {
 function emptyProgress() {
   return {
     cards: {},
+    favorites: {},
+    custom: [],
     settings: { goal: DEFAULT_GOAL, theme: 'linen', register: 'kirja' },
     stats: {
       day: '',
@@ -49,6 +55,7 @@ function emptyProgress() {
       answers: 0,
       correct: 0,
       streak: { last: null, days: 0 },
+      lastSession: null,
     },
     history: {},
   };
@@ -62,6 +69,8 @@ function normalizeProgress(parsed) {
   const stats = parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : {};
   return {
     cards: parsed.cards && typeof parsed.cards === 'object' ? parsed.cards : {},
+    favorites: parsed.favorites && typeof parsed.favorites === 'object' ? parsed.favorites : {},
+    custom: Array.isArray(parsed.custom) ? parsed.custom : [],
     settings: Object.assign({}, blank.settings, parsed.settings || {}),
     stats: Object.assign({}, blank.stats, stats, {
       streak: Object.assign({}, blank.stats.streak, stats.streak || {}),
@@ -70,14 +79,32 @@ function normalizeProgress(parsed) {
   };
 }
 
+/* Bütün katmanlar tek kayıtta yaşar: SM-2 kartları, seri, zor kelime
+   ölçümleri, favoriler ve kişisel kartlar aynı `progress` nesnesinin
+   alanlarıdır; `saveProgress()` hepsini tek anahtara yazar. Eski v1 kaydı
+   varsa bir kez v2'ye taşınır; uygulama artık v1'e yazmaz. */
 function loadProgress() {
+  let raw = readStore(STORE_KEY);
+  let legacy = false;
+  if (!raw) {
+    for (let i = 0; i < LEGACY_STORE_KEYS.length; i += 1) {
+      const old = readStore(LEGACY_STORE_KEYS[i]);
+      if (old) {
+        raw = old;
+        legacy = true;
+        break;
+      }
+    }
+  }
   let parsed = null;
   try {
-    parsed = JSON.parse(readStore(STORE_KEY) || 'null');
+    parsed = JSON.parse(raw || 'null');
   } catch (error) {
     parsed = null;
   }
-  return normalizeProgress(parsed);
+  const normalized = normalizeProgress(parsed);
+  if (legacy) writeStore(STORE_KEY, JSON.stringify(normalized));
+  return normalized;
 }
 
 const progress = loadProgress();
@@ -264,6 +291,69 @@ function currentStreak() {
   return 0;
 }
 
+/* ---------------- Günlük hedef ve haftalık çizgi ---------------- */
+
+function todayCount() {
+  return progress.stats.day === dayKey() ? progress.stats.dayCount || 0 : 0;
+}
+
+function goalInfo() {
+  const goal = progress.settings.goal || DEFAULT_GOAL;
+  const today = todayCount();
+  return {
+    today,
+    goal,
+    percent: Math.min(100, Math.round((today / Math.max(1, goal)) * 100)),
+    streak: currentStreak(),
+  };
+}
+
+/* Günlük hedef halkası: tek çizgi, bakır yay; süs yok. */
+function streakRingHtml() {
+  const info = goalInfo();
+  const radius = 34;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (circumference * info.percent) / 100;
+  return `<figure class="streak-ring" aria-label="Günlük hedef ${info.today} / ${info.goal} kart, seri ${info.streak} gün">
+    <svg viewBox="0 0 84 84" fill="none" aria-hidden="true">
+      <circle class="ring-track" cx="42" cy="42" r="${radius}" />
+      <circle class="ring-fill" cx="42" cy="42" r="${radius}" stroke-dasharray="${circumference.toFixed(
+        2,
+      )}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 42 42)" />
+    </svg>
+    <figcaption><b>${info.today}</b><span> / ${info.goal} kart</span><em>seri ${info.streak} gün</em></figcaption>
+  </figure>`;
+}
+
+/* Son yedi günün cevap sayısı: tek kırık çizgi. */
+function weekLineHtml() {
+  const days = [];
+  for (let i = 6; i >= 0; i -= 1) {
+    const key = shiftKey(dayKey(), -i);
+    days.push({ key, count: progress.history[key] || 0 });
+  }
+  const max = Math.max(1, ...days.map((day) => day.count));
+  const points = days
+    .map((day, index) => {
+      const x = 2 + (index / 6) * 116;
+      const y = 34 - (day.count / max) * 26;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  const dots = days
+    .map((day, index) => {
+      const x = 2 + (index / 6) * 116;
+      const y = 34 - (day.count / max) * 26;
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.6" />`;
+    })
+    .join('');
+  return `<svg class="week-line" viewBox="0 0 120 40" preserveAspectRatio="none" aria-hidden="true">
+    <line x1="0" y1="34" x2="120" y2="34" />
+    <polyline points="${points}" />
+    ${dots}
+  </svg>`;
+}
+
 /* ---------------- Sözlük ---------------- */
 
 const LEXICON = new Map();
@@ -272,6 +362,100 @@ ALL_CARDS.forEach((card) => {
   const key = card.fi.toLocaleLowerCase('fi');
   if (!LEXICON.has(key)) LEXICON.set(key, card);
 });
+
+/* ---------------- Modüler mimari ----------------
+   Memrise'ın modül → kademe bölümlemesinden esinlenir: her hafta bir modül,
+   modül beş kartlık kademelere ayrılır. Kademenin durumu bir "büyüme evresi"
+   ile okunur (tohum → filiz → yaprak → dal → çiçek). SM-2 durumu değişmez;
+   kademe yalnızca aynı modülün kartlarını gruplar, sıralamayı motor yapar. */
+
+const LEVEL_SIZE = 5;
+const GROWTH_STAGES = ['Tohum', 'Filiz', 'Yaprak', 'Dal', 'Çiçek'];
+
+const MODULES = WEEKS.map((week) => {
+  const cards = poolFor(week.id);
+  const ordered = cards
+    .filter((card) => card.type === 'kelime')
+    .concat(cards.filter((card) => card.type !== 'kelime'));
+  const levels = [];
+  for (let i = 0; i < ordered.length; i += LEVEL_SIZE) {
+    levels.push({
+      id: `${week.id}.${levels.length + 1}`,
+      week: week.id,
+      index: levels.length + 1,
+      cards: ordered.slice(i, i + LEVEL_SIZE),
+    });
+  }
+  return { id: week.id, title: week.title, focus: week.focus, cards, levels };
+});
+
+function moduleFor(week) {
+  const id = Number(week);
+  return MODULES.find((module) => module.id === id) || null;
+}
+
+function levelFor(levelId) {
+  const parts = String(levelId == null ? '' : levelId).split('.');
+  const module = moduleFor(parts[0]);
+  if (!module) return null;
+  return module.levels.find((level) => level.id === String(levelId)) || null;
+}
+
+function levelLearned(level) {
+  return level.cards.filter((card) => cardState(card.id).reps > 0).length;
+}
+
+function levelPercent(level) {
+  return level.cards.length ? Math.round((levelLearned(level) / level.cards.length) * 100) : 0;
+}
+
+function growthStage(level) {
+  const learned = levelLearned(level);
+  if (!learned) return 0;
+  const ratio = learned / level.cards.length;
+  if (ratio >= 1) return 4;
+  if (ratio >= 0.6) return 3;
+  if (ratio >= 0.3) return 2;
+  return 1;
+}
+
+/* Gölgesiz, keskin geometrik semboller: her evre tek bir 1px işaret,
+   miter birleşim, dolgu yok. Renk currentColor ile temaya uyar. */
+function growthGlyph(stage, extra) {
+  const marks = [
+    '<path d="M8 9.2 11 12 8 14.8 5 12Z" />',
+    '<path d="M8 14.5V8M8 10.5 5.6 8M8 12.5 10.4 10" />',
+    '<path d="M8 14.5V7M8 9.5 5 7.4M8 9.5 11 7.4" />',
+    '<path d="M8 14.5V5.5M8 8 4.6 5.6M8 10.6 11.4 8.2M8 9.5 11.4 12" />',
+    '<path d="M8 3.5v3M8 9.5v3M3.5 8h3M9.5 8h3M8 6.2 9.8 8 8 9.8 6.2 8Z" />',
+  ];
+  const mark = marks[stage] || marks[0];
+  return `<svg class="ico ico--growth${extra ? ' ' + extra : ''}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="miter" aria-hidden="true">${mark}</svg>`;
+}
+
+function markGlyph() {
+  return '<svg class="ico ico--mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" /><path d="M8 5.4v5.2M6.3 8.6 8 10.3l1.7-1.7" /></svg>';
+}
+
+/* Bir kademenin kuyruğu: tekrarı gelenler önce, sonra yeni kartlar,
+   en son henüz vakti gelmemiş olanlar. */
+function buildLevelQueue(level, now) {
+  const at = typeof now === 'number' ? now : Date.now();
+  const due = level.cards
+    .filter((card) => {
+      const s = cardState(card.id);
+      return s.reps > 0 && s.due <= at;
+    })
+    .sort((a, b) => cardState(a.id).due - cardState(b.id).due);
+  const fresh = shuffle(level.cards.filter((card) => cardState(card.id).reps === 0));
+  const later = shuffle(
+    level.cards.filter((card) => {
+      const s = cardState(card.id);
+      return s.reps > 0 && s.due > at;
+    }),
+  );
+  return due.concat(fresh, later);
+}
 
 /* Puhekieli biçimleri yalın hâlde sözlükte olmadığı için ayrı tablo.
    Her giriş yazı dili karşılığını ve varsa kişi/hâl ekini taşır; röntgen
@@ -708,6 +892,14 @@ const state = {
   token: null,
   search: '',
   labWord: '',
+  filter: 'all',
+  hub: false,
+  summary: false,
+  speedTimer: null,
+  speedStart: 0,
+  coach: { tab: 'dialog', scenario: 0, turn: 0, picked: null, showTr: false, hint: false, key: '', options: [] },
+  pron: { index: 0, heard: '', heardOk: false },
+  immerse: { index: 0, showTr: false },
 };
 
 function announce(message) {
@@ -724,7 +916,24 @@ function startSession(week, options) {
   const opts = options || {};
   const target = week == null ? state.week : String(week);
   state.week = target;
-  const queue = opts.free ? shuffle(poolFor(target)).slice(0, 10) : buildQueue(target);
+  const level = opts.level ? levelFor(opts.level) : null;
+  let queue;
+  let mode = 'new';
+  if (level) {
+    queue = buildLevelQueue(level);
+    mode = 'level';
+  } else if (opts.speed) {
+    queue = buildSpeedQueue(target);
+    mode = 'speed';
+  } else if (opts.hard) {
+    queue = hardPool(target);
+    mode = 'hard';
+  } else if (opts.free) {
+    queue = shuffle(poolFor(target)).slice(0, 10);
+    mode = 'free';
+  } else {
+    queue = buildQueue(target);
+  }
   state.session = {
     queue,
     total: queue.length,
@@ -732,9 +941,14 @@ function startSession(week, options) {
     correct: 0,
     repeated: new Set(),
     free: Boolean(opts.free),
+    mode,
+    level: level ? level.id : null,
   };
   state.flipped = false;
   state.token = null;
+  state.hub = false;
+  state.summary = false;
+  clearSpeed();
 }
 
 /* ---------------- Çizim ---------------- */
@@ -781,13 +995,20 @@ function answerHtml(card) {
 
 function endHtml(session) {
   const percent = session.done ? Math.round((session.correct / session.done) * 100) : 0;
-  return `<article class="focus">
-    <p class="eyebrow"><span>Oturum tamam</span><span>Hafta ${esc(state.week)}</span></p>
-    <p class="end-line"><b>${session.done}</b> kart · <b>${session.correct}</b> doğru · %${percent}</p>
-    <p class="lede">Kuyruk boşaldı. Yeni oturum, tekrar zamanı gelen kartlarla devam eder.</p>
+  return `<article class="summary">
+    <p class="kicker"><span>Oturum özeti</span><span>${esc(modeLabel(session))}</span></p>
+    <h1 class="view-title">Kuyruk boşaldı</h1>
+    <dl class="summary-grid">
+      <div><dt>Kart</dt><dd>${session.done}</dd></div>
+      <div><dt>Doğru</dt><dd>${session.correct}</dd></div>
+      <div><dt>Oran</dt><dd>${percent}%</dd></div>
+      <div><dt>Hafta</dt><dd>${pad2(state.week)}</dd></div>
+    </dl>
+    <p class="lede">Yeni oturum, tekrar zamanı gelen kartlarla devam eder; hızlı tekrar on kartlık bir refleks turudur.</p>
     <div class="actions">
       <button class="btn btn--primary" type="button" data-act="new-session">Yeni oturum</button>
-      <button class="btn" type="button" data-act="free-session">Serbest tekrar (10)</button>
+      <button class="btn" type="button" data-act="mode-speed">Hızlı tekrar</button>
+      <button class="btn btn--quiet" type="button" data-act="hub">Oturum merkezi</button>
     </div>
   </article>`;
 }
@@ -799,7 +1020,8 @@ function emptyHtml() {
     <p class="lede">Yeni kartlar eklemek için başka bir hafta seç ya da serbest tekrarla dön.</p>
     <div class="actions">
       <button class="btn btn--primary" type="button" data-act="free-session">Serbest tekrar (10)</button>
-      <button class="btn" type="button" data-act="open-index">Dizini aç</button>
+      <button class="btn" type="button" data-act="open-index">Sözlüğü aç</button>
+      <button class="btn btn--quiet" type="button" data-act="hub">Oturum merkezi</button>
     </div>
   </article>`;
 }
@@ -855,10 +1077,7 @@ function speechAvailable() {
   );
 }
 
-function speak(rate) {
-  const card = currentCard();
-  if (!card) return;
-  const text = displayFi(card.fi);
+function speakText(text, rate) {
   if (!speechAvailable()) {
     announce('Bu tarayıcı sesli okumayı desteklemiyor');
     return;
@@ -872,6 +1091,12 @@ function speak(rate) {
   announce(`${text} · ${rate === 1 ? 'normal hız' : `${rate}× yavaş`}`);
 }
 
+function speak(rate) {
+  const card = currentCard();
+  if (!card) return;
+  speakText(displayFi(card.fi), rate);
+}
+
 function setRegister(mode) {
   progress.settings.register = mode === 'puhe' ? 'puhe' : 'kirja';
   saveProgress();
@@ -883,6 +1108,14 @@ function setRegister(mode) {
 function renderStudy() {
   const el = document.getElementById('view-study');
   if (!el) return;
+  if (state.hub) {
+    renderHub();
+    return;
+  }
+  if (state.summary) {
+    renderSummary();
+    return;
+  }
   if (!state.session) startSession(state.week);
 
   const session = state.session;
@@ -898,6 +1131,8 @@ function renderStudy() {
 
   const shown = displayFi(card.fi);
   const register = progress.settings.register === 'puhe' ? 'puhe' : 'kirja';
+  const module = moduleFor(card.week);
+  const level = session.level ? levelFor(session.level) : null;
 
   const prompt = tokenize(shown)
     .map((part) =>
@@ -931,13 +1166,25 @@ function renderStudy() {
     .join('');
 
   el.innerHTML = `<article class="focus">
-    <p class="eyebrow"><span>Hafta ${card.week}</span><span>${esc(card.type)}</span><span>${pad2(
-      session.done + 1,
-    )} / ${pad2(total)}</span></p>
+    <p class="eyebrow"><span class="eyebrow-mark">${growthGlyph(module ? growthStage(module) : 0)}</span><span>Modül ${pad2(
+      card.week,
+    )}${module ? ` · ${esc(module.title)}` : ''}</span><span>${pad2(session.done + 1)} / ${pad2(
+      total,
+    )}</span></p>
     <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
       percent,
     )}"><span style="width:${percent.toFixed(1)}%"></span></div>
+    <div class="session-bar">
+      <button class="link-btn" type="button" data-act="hub">Oturum merkezi · 4 mod</button>
+      <span class="session-mode">${modeLabel(session)}</span>
+    </div>
+    ${
+      session.mode === 'speed'
+        ? '<div class="speed"><div class="speed-bar" id="speedBar"><span></span></div><span class="speed-label" id="speedLabel">8 sn</span></div>'
+        : ''
+    }
     ${registerSwitch}
+    ${level ? ladderHtml(level, session) : ''}
     <p class="prompt">${prompt}</p>
     ${rhythmHtml(shown)}
     ${listen}
@@ -952,6 +1199,7 @@ function renderStudy() {
   <div class="xray-slot" id="xraySlot">${
     state.token ? xrayHtml(analyze(state.token)) : xrayHtml(null)
   }</div>`;
+  armSpeed();
 }
 
 function weekRow(week) {
@@ -968,32 +1216,277 @@ function weekRow(week) {
   </button>`;
 }
 
-function resultRow(card) {
-  return `<button type="button" class="result" data-lab="${esc(card.fi)}">
-    <span class="result-fi">${esc(card.fi)}</span>
-    <span class="result-tr">${esc(card.tr)}</span>
-    <span class="result-tag">Hafta ${card.week}</span>
-  </button>`;
+/* ---------------- Sözlük: arama, favoriler, kişisel kartlar ----------------
+   328 kartın tamamı listelenir; "Kelimelerim" yıldızları ve kişisel kartlar
+   yalnızca bu görünümde yaşar, SM-2 kaydına dokunmaz. */
+
+function allEntries() {
+  const custom = (progress.custom || []).filter((card) => card && card.fi && card.tr);
+  return ALL_CARDS.concat(custom);
+}
+
+function isFavorite(id) {
+  return Boolean(progress.favorites && progress.favorites[id]);
+}
+
+function toggleFavorite(id) {
+  if (!id) return;
+  progress.favorites = progress.favorites || {};
+  if (progress.favorites[id]) delete progress.favorites[id];
+  else progress.favorites[id] = true;
+  saveProgress();
+  renderIndex();
+  announce(progress.favorites[id] ? 'Kelimelerime eklendi' : 'Kelimelerimden çıkarıldı');
+}
+
+function addCustomCard(fi, tr) {
+  const cleanFi = String(fi == null ? '' : fi).trim();
+  const cleanTr = String(tr == null ? '' : tr).trim();
+  if (!cleanFi || !cleanTr) {
+    announce('Fince ve Türkçe alanları gerekli');
+    return false;
+  }
+  progress.custom = progress.custom || [];
+  progress.custom.push({
+    id: `c-${Date.now()}-${progress.custom.length + 1}`,
+    fi: cleanFi,
+    tr: cleanTr,
+    week: 0,
+    type: 'kelime',
+    note: 'Kişisel kart',
+    custom: true,
+  });
+  saveProgress();
+  state.filter = 'mine';
+  const fiInput = document.getElementById('customFi');
+  const trInput = document.getElementById('customTr');
+  if (fiInput) fiInput.value = '';
+  if (trInput) trInput.value = '';
+  renderIndex();
+  announce('Kart eklendi');
+  return true;
+}
+
+function removeCustomCard(id) {
+  const before = (progress.custom || []).length;
+  progress.custom = (progress.custom || []).filter((card) => card.id !== id);
+  if (progress.custom.length === before) return;
+  saveProgress();
+  renderIndex();
+  announce('Kart silindi');
+}
+
+function downloadJson(payload, filename) {
+  if (typeof Blob === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) {
+    announce('Bu tarayıcı indirmeyi desteklemiyor');
+    return;
+  }
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportCustomCards() {
+  const list = progress.custom || [];
+  if (!list.length) {
+    announce('Dışa aktarılacak kişisel kart yok');
+    return;
+  }
+  downloadJson(
+    JSON.stringify(
+      { app: 'suomi-kartat', kind: 'custom-cards', exportedAt: new Date().toISOString(), cards: list },
+      null,
+      2,
+    ),
+    'suomi-kartat-kelimelerim.json',
+  );
+  announce(`${list.length} kişisel kart dışa aktarıldı`);
+}
+
+function dictRow(card) {
+  const fav = isFavorite(card.id);
+  return `<li class="dict-row">
+    <button type="button" class="star${fav ? ' is-on' : ''}" data-act="fav" data-id="${esc(
+      card.id,
+    )}" aria-pressed="${fav}" aria-label="${fav ? 'Kelimelerimden çıkar' : 'Kelimelerime ekle'}">★</button>
+    <button type="button" class="dict-main" data-lab="${esc(card.fi)}">
+      <span class="dict-fi">${esc(card.fi)}</span>
+      <span class="dict-tr">${esc(card.tr)}</span>
+    </button>
+    <span class="dict-tag">${card.custom ? 'özel' : `H${pad2(card.week)}`}</span>
+    ${
+      card.custom
+        ? `<button type="button" class="dict-del" data-act="del-custom" data-id="${esc(
+            card.id,
+          )}" aria-label="Kartı sil">×</button>`
+        : ''
+    }
+  </li>`;
 }
 
 function renderIndex() {
   const body = document.getElementById('indexBody');
   if (!body) return;
 
+  const filters = document.getElementById('dictFilters');
+  if (filters && filters.querySelectorAll) {
+    filters.querySelectorAll('[data-filter]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.filter === state.filter));
+    });
+  }
+
   const query = state.search.trim().toLocaleLowerCase('tr');
-  if (query) {
-    const hits = ALL_CARDS.filter(
-      (card) =>
-        card.fi.toLocaleLowerCase('tr').indexOf(query) !== -1 ||
-        card.tr.toLocaleLowerCase('tr').indexOf(query) !== -1,
-    ).slice(0, 40);
-    body.innerHTML = hits.length
-      ? `<div class="results">${hits.map(resultRow).join('')}</div>`
-      : '<p class="empty">Eşleşme yok. Fince ya da Türkçe bir parça dene.</p>';
+  const entries = allEntries().filter((card) => {
+    if (state.filter === 'fav' && !isFavorite(card.id)) return false;
+    if (state.filter === 'mine' && !card.custom) return false;
+    if (state.filter === 'kelime' && card.type !== 'kelime') return false;
+    if (state.filter === 'lause' && card.type === 'kelime') return false;
+    if (!query) return true;
+    return (
+      card.fi.toLocaleLowerCase('tr').indexOf(query) !== -1 ||
+      card.tr.toLocaleLowerCase('tr').indexOf(query) !== -1
+    );
+  });
+
+  if (!entries.length) {
+    const message =
+      state.filter === 'fav'
+        ? 'Henüz yıldızladığın kart yok. Bir satırdaki ★ ile listene al.'
+        : state.filter === 'mine'
+          ? 'Kendi kartın yok. Yukarıdaki formdan ekle.'
+          : 'Eşleşme yok. Fince ya da Türkçe bir parça dene.';
+    body.innerHTML = `<p class="empty">${message}</p>`;
     return;
   }
 
-  body.innerHTML = `<div class="week-list">${WEEKS.map(weekRow).join('')}</div>`;
+  const shown = query ? entries.slice(0, 60) : entries;
+  body.innerHTML = `<p class="dict-count">${shown.length} kart${
+    entries.length > shown.length ? ` / ${entries.length} eşleşme` : ''
+  }</p>
+    <ol class="dict-list">${shown.map(dictRow).join('')}</ol>`;
+}
+
+/* ---------------- Patika çizimi ---------------- */
+
+function ladderHtml(level, session) {
+  const pips = level.cards
+    .map((card) => {
+      const done = session.queue.indexOf(card) === -1;
+      const now = session.queue[0] && session.queue[0].id === card.id;
+      return `<span class="pip${done ? ' is-done' : ''}${now ? ' is-now' : ''}"></span>`;
+    })
+    .join('');
+  return `<div class="ladder-row"><span class="ladder-label">Kademe ${pad2(
+    level.index,
+  )}</span><span class="ladder">${pips}</span><span class="ladder-count">${levelLearned(level)}/${
+    level.cards.length
+  }</span></div>`;
+}
+
+function moduleHtml(module) {
+  const learned = module.cards.filter((card) => cardState(card.id).reps > 0).length;
+  const due = dueCount(module.id);
+
+  const levels = module.levels
+    .map(
+      (level) => `<button type="button" class="level" data-act="level" data-level="${level.id}" aria-label="Modül ${
+        module.id
+      }, kademe ${level.index}: ${levelLearned(level)} / ${level.cards.length} kart">
+        <span class="level-num">${pad2(level.index)}</span>
+        ${growthGlyph(growthStage(level), 'level-glyph')}
+        <span class="level-meter"><span style="width:${levelPercent(level)}%"></span></span>
+      </button>`,
+    )
+    .join('');
+
+  return `<li class="module">
+    <div class="module-head">
+      <span class="module-mark">${growthGlyph(growthStage(module))}</span>
+      <span class="module-num">${pad2(module.id)}</span>
+      <span class="module-body">
+        <span class="module-title">${esc(module.title)}</span>
+        <span class="module-focus">${esc(module.focus)}</span>
+      </span>
+      <span class="module-count"><b>${learned}</b><i>/${module.cards.length}</i></span>
+    </div>
+    <div class="module-levels">${levels}</div>
+    <div class="module-foot">
+      <button class="btn btn--primary btn--tight" type="button" data-act="module" data-week="${module.id}">Modülü çalış</button>
+      <span class="module-due">${due ? `${due} tekrar hazır` : 'tekrar yok'} · ${module.levels.length} kademe</span>
+    </div>
+  </li>`;
+}
+
+function renderPath() {
+  const el = document.getElementById('view-path');
+  if (!el) return;
+
+  const levels = MODULES.reduce((list, module) => list.concat(module.levels), []);
+  const bloomed = levels.filter((level) => growthStage(level) === 4).length;
+  const due = MODULES.reduce((total, module) => total + dueCount(module.id), 0);
+  const goal = progress.settings.goal || DEFAULT_GOAL;
+  const theme = progress.settings.theme === 'fjord' ? 'fjord' : 'linen';
+  const answers = progress.stats.answers || 0;
+  const correct = progress.stats.correct || 0;
+  const accuracy = answers ? Math.round((correct / answers) * 100) : 0;
+
+  el.innerHTML = `<div class="path-head">
+      <p class="kicker">${markGlyph()}<span>01 · Yolculuk</span></p>
+      <h1 class="view-title">Yolculuk</h1>
+      <p class="lede">On altı modül; her modül beş kartlık kademelere bölünür. Kademe, kartlar oturdukça tohumdan çiçeğe açılır. Sıra ve tarih SM-2'nin kendi takviminde kalır.</p>
+      <div class="journey-top">
+        ${streakRingHtml()}
+        <div class="journey-side">
+          <p class="journey-label">Son yedi gün · cevap</p>
+          ${weekLineHtml()}
+          <p class="journey-note">${todayCount()} kart bugün · doğru oranı %${accuracy}</p>
+          <dl class="path-stats">
+            <div><dt>Modül</dt><dd>${MODULES.length}</dd></div>
+            <div><dt>Kademe</dt><dd>${levels.length}</dd></div>
+            <div><dt>Çiçek</dt><dd>${bloomed}</dd></div>
+            <div><dt>Tekrar</dt><dd>${due}</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+    <ol class="modules">${MODULES.map(moduleHtml).join('')}</ol>
+    <details class="settings-block">
+      <summary>Muhasebe &amp; ayarlar</summary>
+      <dl class="ledger">
+        <div><dt>Öğrenilen</dt><dd><b>${learnedCount()}</b><span> / ${ALL_CARDS.length}</span></dd></div>
+        <div><dt>Bugün</dt><dd><b>${todayCount()}</b><span> / ${goal}</span></dd></div>
+        <div><dt>Doğru oranı</dt><dd><b>${accuracy}%</b><span> ${correct} / ${answers}</span></dd></div>
+        <div><dt>Seri</dt><dd><b>${currentStreak()}</b><span> gün</span></dd></div>
+      </dl>
+      <div class="settings">
+        <label class="setting"><span>Günlük hedef</span>
+          <input id="goalInput" type="number" min="4" max="60" step="1" inputmode="numeric" value="${goal}">
+        </label>
+        <label class="setting"><span>Tema</span>
+          <select id="themeSelect">
+            ${Object.keys(THEMES)
+              .map(
+                (key) =>
+                  `<option value="${key}"${theme === key ? ' selected' : ''}>${THEMES[key]}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" data-act="backup">Yedek al</button>
+        <label class="btn btn--file">Yedek yükle
+          <input id="backupFile" class="sr-only" type="file" accept="application/json,.json">
+        </label>
+        <button class="btn btn--quiet" type="button" data-act="reset">İlerlemeyi sıfırla</button>
+      </div>
+    </details>`;
 }
 
 const LAB_SAMPLES = ['kaupungissani', 'talossa', 'lukemassa', 'pidän', 'metsässä', 'opettajaksi'];
@@ -1013,54 +1506,463 @@ function renderLabOutput() {
   out.innerHTML = xrayHtml(analyze(state.labWord));
 }
 
-function renderLedger() {
-  const el = document.getElementById('view-ledger');
+
+/* ---------------- Oturum merkezi ve dört mod ---------------- */
+
+function modeLabel(session) {
+  if (!session) return '';
+  if (session.mode === 'speed') return 'Hızlı tekrar';
+  if (session.mode === 'hard') return 'Zor kelimeler';
+  if (session.mode === 'level') return 'Kademe';
+  if (session.mode === 'free') return 'Serbest';
+  return 'Yeni öğrenme';
+}
+
+function buildSpeedQueue(week, now) {
+  const at = typeof now === 'number' ? now : Date.now();
+  const pool = poolFor(week);
+  const due = pool.filter((card) => {
+    const s = cardState(card.id);
+    return s.reps > 0 && s.due <= at;
+  });
+  const rest = pool.filter((card) => due.indexOf(card) === -1);
+  return shuffle(due).concat(shuffle(rest)).slice(0, SPEED_LIMIT);
+}
+
+function weakScore(card) {
+  const s = cardState(card.id);
+  if (!s.seen) return -1;
+  const errorRate = (s.lapses || 0) / s.seen;
+  const easeDrag = (2.5 - Math.min(2.5, s.ease)) / 2.5;
+  return errorRate + easeDrag * 0.5;
+}
+
+/* Yalnızca gerçekten zorlanılan kartlar: en az bir kez tekrara düşmüş ya
+   da kolaylık puanı düşmüş olanlar; hata oranı yüksek olan önce gelir. */
+function hardPool(week) {
+  return poolFor(week)
+    .filter((card) => {
+      const s = cardState(card.id);
+      return s.seen > 0 && ((s.lapses || 0) > 0 || s.ease < 2.4);
+    })
+    .sort((a, b) => weakScore(b) - weakScore(a))
+    .slice(0, HARD_LIMIT);
+}
+
+function clearSpeed() {
+  if (state.speedTimer) {
+    clearInterval(state.speedTimer);
+    state.speedTimer = null;
+  }
+}
+
+/* Hızlı tekrarda her kart kendi geri sayımını taşır; süre biterse kart
+   tekrar havuzuna düşer (SM-2: grade 0). */
+function armSpeed() {
+  clearSpeed();
+  const session = state.session;
+  if (!session || session.mode !== 'speed' || !session.queue.length) return;
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  state.speedStart = Date.now();
+  state.speedTimer = setInterval(() => {
+    const left = Math.max(0, SPEED_MS - (Date.now() - state.speedStart));
+    const bar = document.getElementById('speedBar');
+    const label = document.getElementById('speedLabel');
+    if (bar && bar.style && bar.style.setProperty) {
+      bar.style.setProperty('--left', String(left / SPEED_MS));
+    }
+    if (label) label.textContent = `${Math.ceil(left / 1000)} sn`;
+    if (left <= 0) {
+      clearSpeed();
+      if (!state.session || !state.session.queue.length) return;
+      state.flipped = true;
+      answer(0);
+      announce('Süre doldu · kart tekrara düştü');
+    }
+  }, 120);
+}
+
+function renderHub() {
+  const el = document.getElementById('view-study');
   if (!el) return;
+  const module = moduleFor(state.week) || MODULES[0];
+  const pool = poolFor(module.id);
+  const fresh = pool.filter((card) => cardState(card.id).reps === 0).length;
+  const due = dueCount(module.id);
+  const hard = hardPool(module.id).length;
+  const last = progress.stats.lastSession || null;
+  const lastAccuracy = last && last.done ? Math.round((last.correct / last.done) * 100) : 0;
 
-  const goal = progress.settings.goal || DEFAULT_GOAL;
-  const theme = progress.settings.theme === 'fjord' ? 'fjord' : 'linen';
-  const learned = learnedCount();
-  const answers = progress.stats.answers || 0;
-  const correct = progress.stats.correct || 0;
-  const accuracy = answers ? Math.round((correct / answers) * 100) : 0;
-  const today = progress.stats.day === dayKey() ? progress.stats.dayCount || 0 : 0;
-  const due = ALL_CARDS.filter((card) => {
-    const cardInfo = cardState(card.id);
-    return cardInfo.reps > 0 && cardInfo.due <= Date.now();
-  }).length;
+  el.innerHTML = `<div class="hub">
+    <p class="kicker"><span>02 · Oturum</span><span>Hafta ${pad2(module.id)}</span></p>
+    <h1 class="view-title">Oturum merkezi</h1>
+    <p class="lede">${esc(module.title)} · ${esc(module.focus)}</p>
+    <label class="week-switch">Modül
+      <select id="weekSelect">${WEEKS.map(
+        (week) =>
+          `<option value="${week.id}"${week.id === module.id ? ' selected' : ''}>Hafta ${pad2(
+            week.id,
+          )} · ${esc(week.title)}</option>`,
+      ).join('')}</select>
+    </label>
+    <ul class="mode-grid">
+      <li class="mode-card">
+        <span class="mode-num">a</span>
+        <h2>Yeni öğrenme</h2>
+        <p>Kök–ek röntgeni, kirjakieli/puhekieli anahtarı, 0,75× ve 1,0× ses.</p>
+        <span class="mode-meta">${fresh} yeni · ${due} tekrar</span>
+        <button class="btn btn--primary btn--tight" type="button" data-act="mode-new">Başla</button>
+      </li>
+      <li class="mode-card">
+        <span class="mode-num">b</span>
+        <h2>Hızlı tekrar</h2>
+        <p>Geri sayım barlı refleks turu; süre biten kart tekrara düşer.</p>
+        <span class="mode-meta">10 kart · 8 sn</span>
+        <button class="btn btn--primary btn--tight" type="button" data-act="mode-speed">Başla</button>
+      </li>
+      <li class="mode-card">
+        <span class="mode-num">c</span>
+        <h2>Zor kelimeler</h2>
+        <p>Hata oranı yüksek kartlar; yanlış yaptıkça havuz kendini yeniler.</p>
+        <span class="mode-meta">${hard ? `${hard} kart hazır` : 'henüz ölçüm yok'}</span>
+        <button class="btn btn--primary btn--tight" type="button" data-act="mode-hard"${
+          hard ? '' : ' disabled'
+        }>Başla</button>
+      </li>
+      <li class="mode-card">
+        <span class="mode-num">d</span>
+        <h2>Oturum özeti</h2>
+        <p>Son oturumun kart, doğru ve oran dökümü; tek ölçüm, süs yok.</p>
+        <span class="mode-meta">${last ? `%${lastAccuracy} · ${last.done} kart` : 'henüz oturum yok'}</span>
+        <button class="btn btn--primary btn--tight" type="button" data-act="mode-summary">Özeti aç</button>
+      </li>
+    </ul>
+    <button class="btn btn--quiet" type="button" data-act="hub-close">Karta dön</button>
+  </div>`;
+}
 
-  el.innerHTML = `<h1 class="view-title">Kayıt</h1>
-    <p class="lede">Aralıklı tekrarın muhasebesi; her satır bir ölçüm, süs yok.</p>
-    <dl class="ledger">
-      <div><dt>Öğrenilen</dt><dd><b>${learned}</b><span> / ${ALL_CARDS.length}</span></dd></div>
-      <div><dt>Bugün</dt><dd><b>${today}</b><span> / ${goal}</span></dd></div>
-      <div><dt>Tekrar bekleyen</dt><dd><b>${due}</b></dd></div>
-      <div><dt>Doğru oranı</dt><dd><b>${accuracy}%</b><span> ${correct} / ${answers}</span></dd></div>
-      <div><dt>Seri</dt><dd><b>${currentStreak()}</b><span> gün</span></dd></div>
+function renderSummary() {
+  const el = document.getElementById('view-study');
+  if (!el) return;
+  const last = progress.stats.lastSession;
+  if (!last) {
+    el.innerHTML = `<div class="hub">
+      <p class="kicker"><span>02 · Oturum</span></p>
+      <h1 class="view-title">Oturum özeti</h1>
+      <p class="lede">Henüz bitmiş bir oturum yok. Bir mod seç, ilk ölçüm orada başlar.</p>
+      <div class="actions">
+        <button class="btn btn--primary" type="button" data-act="hub-close">Oturum merkezi</button>
+      </div>
+    </div>`;
+    return;
+  }
+  const accuracy = last.done ? Math.round((last.correct / last.done) * 100) : 0;
+  el.innerHTML = `<article class="summary">
+    <p class="kicker"><span>Oturum özeti</span><span>${esc(modeLabel(last))}</span></p>
+    <h1 class="view-title">${last.done} kart, %${accuracy}</h1>
+    <dl class="summary-grid">
+      <div><dt>Kart</dt><dd>${last.done}</dd></div>
+      <div><dt>Doğru</dt><dd>${last.correct}</dd></div>
+      <div><dt>Oran</dt><dd>${accuracy}%</dd></div>
+      <div><dt>Hafta</dt><dd>${pad2(last.week || state.week)}</dd></div>
     </dl>
-    <h2 class="sub-title">Ayarlar</h2>
-    <div class="settings">
-      <label class="setting"><span>Günlük hedef</span>
-        <input id="goalInput" type="number" min="4" max="60" step="1" inputmode="numeric" value="${goal}">
-      </label>
-      <label class="setting"><span>Tema</span>
-        <select id="themeSelect">
-          ${Object.keys(THEMES)
-            .map(
-              (key) =>
-                `<option value="${key}"${theme === key ? ' selected' : ''}>${THEMES[key]}</option>`,
-            )
-            .join('')}
-        </select>
+    <p class="lede">Tekrar geçmişi SM-2'de; ertesi gün kuyruk kendini yeniden kurar.</p>
+    <div class="actions">
+      <button class="btn btn--primary" type="button" data-act="hub">Oturum merkezi</button>
+      <button class="btn" type="button" data-act="mode-speed">Hızlı tekrar</button>
+      <button class="btn btn--quiet" type="button" data-act="summary-close">Karta dön</button>
+    </div>
+  </article>`;
+}
+
+/* ---------------- AI Koç: diyalog, telaffuz, röntgen ---------------- */
+
+function dialogueGroups(week) {
+  const sentences = poolFor(week).filter((card) => card.type !== 'kelime');
+  const groups = [];
+  for (let i = 0; i < sentences.length; i += 2) groups.push(sentences.slice(i, i + 2));
+  return groups.slice(0, 3);
+}
+
+function dialogueOptions(card) {
+  const seen = [card.tr];
+  const extra = [];
+  shuffle(poolFor(state.week).filter((item) => item.type !== 'kelime'))
+    .concat(shuffle(ALL_CARDS.filter((item) => item.type !== 'kelime')))
+    .forEach((candidate) => {
+      if (extra.length >= 2) return;
+      if (seen.indexOf(candidate.tr) !== -1) return;
+      seen.push(candidate.tr);
+      extra.push(candidate.tr);
+    });
+  return shuffle([card.tr].concat(extra));
+}
+
+function hintHtml(card) {
+  const words = String(card.fi).match(/\p{L}+/gu) || [];
+  const results = words.slice(0, 3).map((word) => analyze(word)).filter(Boolean);
+  if (!results.length) return 'İpucu yok.';
+  return `İpucu: ${results
+    .map((result) => `<b>${esc(result.word)}</b> ${esc(result.lemmaTr || '—')}`)
+    .join(' · ')}`;
+}
+
+function renderCoach() {
+  const tab = state.coach.tab === 'pron' || state.coach.tab === 'lab' ? state.coach.tab : 'dialog';
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    document.querySelectorAll('[data-pane]').forEach((pane) => {
+      pane.hidden = pane.dataset.pane !== tab;
+    });
+    document.querySelectorAll('[data-coach]').forEach((button) => {
+      button.setAttribute('aria-selected', String(button.dataset.coach === tab));
+    });
+  }
+  renderDialog();
+  renderPron();
+}
+
+function renderDialog() {
+  const el = document.getElementById('dialogBody');
+  if (!el) return;
+  const module = moduleFor(state.week) || MODULES[0];
+  const groups = dialogueGroups(module.id);
+  if (!groups.length) {
+    el.innerHTML = '<p class="empty">Bu modülde cümle yok. Başka bir hafta seç.</p>';
+    return;
+  }
+  const sIndex = Math.min(Math.max(0, state.coach.scenario || 0), groups.length - 1);
+  const group = groups[sIndex];
+  const turnIndex = Math.min(Math.max(0, state.coach.turn || 0), group.length - 1);
+  const card = group[turnIndex];
+  const key = `${module.id}:${sIndex}:${turnIndex}`;
+  if (state.coach.key !== key) {
+    state.coach.key = key;
+    state.coach.options = dialogueOptions(card);
+    state.coach.picked = null;
+    state.coach.showTr = false;
+    state.coach.hint = false;
+  }
+  state.coach.scenario = sIndex;
+  state.coach.turn = turnIndex;
+
+  const picked = state.coach.picked;
+  const scenarios = groups
+    .map(
+      (entry, i) =>
+        `<button type="button" data-act="scenario" data-scenario="${i}" aria-pressed="${
+          i === sIndex
+        }">Diyalog ${i + 1}</button>`,
+    )
+    .join('');
+  const options = state.coach.options
+    .map((text, i) => {
+      const right = text === card.tr;
+      const klass = picked == null ? '' : right ? ' is-right' : picked === i ? ' is-wrong' : '';
+      return `<button type="button" class="opt${klass}" data-act="reply" data-opt="${i}"><span class="opt-idx">${pad2(
+        i + 1,
+      )}</span><span>${esc(text)}</span></button>`;
+    })
+    .join('');
+  const solved = picked != null && state.coach.options[picked] === card.tr;
+  const done = solved && turnIndex + 1 >= group.length;
+  const listen = speechAvailable()
+    ? `<button type="button" data-act="coach-speak" data-rate="0.75">Dinle · 0,75×</button><button type="button" data-act="coach-speak" data-rate="1">Dinle · 1,0×</button>`
+    : '';
+
+  el.innerHTML = `<p class="kicker"><span>Diyalog</span><span>Hafta ${pad2(module.id)} · ${
+    turnIndex + 1
+  }/${group.length}</span></p>
+    <div class="coach-scenarios">${scenarios}</div>
+    <article class="bubble">
+      <p class="bubble-who">Koç</p>
+      <p class="bubble-fi">${esc(displayFi(card.fi))}</p>
+      <div class="bubble-tools">
+        ${listen}
+        <button type="button" data-act="coach-hint">İpucu</button>
+        <button type="button" data-act="coach-tr">${
+          state.coach.showTr ? 'Çeviriyi gizle' : 'Anlık çeviri'
+        }</button>
+      </div>
+      ${
+        state.coach.showTr
+          ? `<p class="bubble-tr">${esc(card.tr)}${card.note ? ` · ${esc(card.note)}` : ''}</p>`
+          : ''
+      }
+      ${state.coach.hint ? `<p class="bubble-hint">${hintHtml(card)}</p>` : ''}
+    </article>
+    <p class="coach-q">Koç ne dedi?</p>
+    <div class="coach-opts">${options}</div>
+    ${
+      picked == null
+        ? ''
+        : solved
+          ? `<div class="coach-feedback"><span>Doğru · ${esc(card.tr)}</span>${
+              done
+                ? '<button class="btn btn--primary btn--tight" type="button" data-act="scenario-next">Diyaloğu bitir</button>'
+                : '<button class="btn btn--primary btn--tight" type="button" data-act="coach-next">Sıradaki replik</button>'
+            }</div>`
+          : '<div class="coach-feedback"><span>Henüz değil; çeviriyi ya da ipucunu dene.</span></div>'
+    }`;
+}
+
+function recognitionAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+  );
+}
+
+function normalizeSpeech(text) {
+  return String(text == null ? '' : text)
+    .toLocaleLowerCase('fi')
+    .replace(/[^\p{L}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function startRecognition() {
+  if (!recognitionAvailable()) {
+    announce('Bu tarayıcı konuşma tanımayı desteklemiyor');
+    return;
+  }
+  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const card = allEntries().find((item) => item.id === state.pron.cardId);
+  if (!card) return;
+  try {
+    const recognition = new Ctor();
+    recognition.lang = 'fi-FI';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      const heard = (event.results[0] && event.results[0][0] && event.results[0][0].transcript) || '';
+      state.pron.heard = heard;
+      state.pron.heardOk = normalizeSpeech(heard) === normalizeSpeech(card.fi);
+      renderPron();
+      announce(state.pron.heardOk ? 'Telaffuz eşleşti' : `Duyulan: ${heard}`);
+    };
+    recognition.onerror = () => announce('Tanıma tamamlanamadı');
+    recognition.start();
+    announce('Dinliyorum…');
+  } catch (error) {
+    announce('Tanıma başlatılamadı');
+  }
+}
+
+function renderPron() {
+  const el = document.getElementById('pronBody');
+  if (!el) return;
+  const module = moduleFor(state.week) || MODULES[0];
+  const pool = poolFor(module.id);
+  const words = pool.filter((card) => card.type === 'kelime');
+  const list = words.length ? words : pool;
+  if (!list.length) {
+    el.innerHTML = '<p class="empty">Bu modülde kart yok.</p>';
+    return;
+  }
+  const index = (((state.pron.index || 0) % list.length) + list.length) % list.length;
+  state.pron.index = index;
+  const card = list[index];
+  state.pron.cardId = card.id;
+  const shown = displayFi(card.fi);
+  const listen = speechAvailable()
+    ? `<div class="listen">
+        <button class="listen-btn" type="button" data-act="pron-speak" data-rate="0.75">Dinle · 0,75×</button>
+        <button class="listen-btn" type="button" data-act="pron-speak" data-rate="1">Dinle · 1,0×</button>
+        ${
+          recognitionAvailable()
+            ? '<button class="listen-btn" type="button" data-act="pron-listen">Mikrofonla dene</button>'
+            : ''
+        }
+      </div>`
+    : '<p class="pron-note">Bu tarayıcı sesli okumayı desteklemiyor.</p>';
+
+  el.innerHTML = `<p class="kicker"><span>Telaffuz stüdyosu</span><span>${pad2(index + 1)} / ${pad2(
+    list.length,
+  )}</span></p>
+    <p class="pron-fi">${esc(shown)}</p>
+    <p class="pron-note">${esc(card.tr)} · ${esc(
+      REGISTERS[progress.settings.register === 'puhe' ? 'puhe' : 'kirja'],
+    )}</p>
+    ${rhythmHtml(shown)}
+    ${listen}
+    ${
+      state.pron.heard
+        ? `<p class="pron-heard">Duyulan: <b>${esc(state.pron.heard)}</b> · ${
+            state.pron.heardOk ? 'eşleşti' : 'tekrar dinle'
+          }</p>`
+        : ''
+    }
+    <div class="actions">
+      <button class="btn" type="button" data-act="pron-next">Sonraki kart</button>
+      <button class="btn btn--quiet" type="button" data-act="pron-xray">Röntgeni aç</button>
+    </div>`;
+}
+
+/* ---------------- Dalma: bağlam içi mikro-okuma ---------------- */
+
+function renderImmerse() {
+  const el = document.getElementById('view-immerse');
+  if (!el) return;
+  const module = moduleFor(state.week) || MODULES[0];
+  const sentences = poolFor(module.id).filter((card) => card.type !== 'kelime');
+  const list = sentences.length ? sentences : poolFor(module.id);
+  const total = list.length;
+  if (!total) {
+    el.innerHTML = '<p class="empty">Bu modülde okunacak cümle yok.</p>';
+    return;
+  }
+  const index = (((state.immerse.index || 0) % total) + total) % total;
+  state.immerse.index = index;
+  const card = list[index];
+  const shown = displayFi(card.fi);
+  const dots = list
+    .map(
+      (entry, i) =>
+        `<span class="reading-dot${i === index ? ' is-on' : i < index ? ' is-read' : ''}"></span>`,
+    )
+    .join('');
+
+  el.innerHTML = `<div class="view-head">
+      <p class="kicker"><span>05 · Dalma</span><span>Hafta ${pad2(module.id)}</span></p>
+      <h1 class="view-title">Dalma</h1>
+      <p class="lede">${esc(module.title)} · cümleleri bağlam içinde oku ve dinle.</p>
+      <label class="week-switch">Modül
+        <select id="immerseWeek">${WEEKS.map(
+          (week) =>
+            `<option value="${week.id}"${week.id === module.id ? ' selected' : ''}>Hafta ${pad2(
+              week.id,
+            )} · ${esc(week.title)}</option>`,
+        ).join('')}</select>
       </label>
     </div>
-    <div class="actions">
-      <button class="btn" type="button" data-act="backup">Yedek al</button>
-      <label class="btn btn--file">Yedek yükle
-        <input id="backupFile" class="sr-only" type="file" accept="application/json,.json">
-      </label>
-      <button class="btn btn--quiet" type="button" data-act="reset">İlerlemeyi sıfırla</button>
-    </div>`;
+    <article class="reading">
+      <p class="reading-count">${pad2(index + 1)} / ${pad2(total)} · ${
+        card.type === 'kelime' ? 'kelime' : 'cümle'
+      }</p>
+      <p class="reading-fi">${esc(shown)}</p>
+      ${rhythmHtml(shown)}
+      ${
+        speechAvailable()
+          ? `<div class="listen"><button class="listen-btn" type="button" data-act="immerse-speak" data-rate="0.75">Dinle · 0,75×</button><button class="listen-btn" type="button" data-act="immerse-speak" data-rate="1">Dinle · 1,0×</button></div>`
+          : ''
+      }
+      ${
+        state.immerse.showTr
+          ? `<div class="reading-tr">${esc(card.tr)}${
+              card.note ? `<p class="note">${esc(card.note)}</p>` : ''
+            }</div>`
+          : '<button class="btn btn--primary reveal" type="button" data-act="immerse-tr">Anlamı göster</button>'
+      }
+      <div class="reading-nav">
+        <button class="btn btn--tight" type="button" data-act="immerse-prev"${
+          index === 0 ? ' disabled' : ''
+        }>Geri</button>
+        <span class="reading-dots">${dots}</span>
+        <button class="btn btn--tight" type="button" data-act="immerse-next">${
+          index + 1 >= total ? 'Baştan' : 'İleri'
+        }</button>
+      </div>
+    </article>`;
 }
 
 function setView(view, options) {
@@ -1075,13 +1977,18 @@ function setView(view, options) {
     else button.removeAttribute('aria-current');
   });
 
-  if (view === 'study') renderStudy();
+  if (view === 'path') renderPath();
+  if (view === 'study') {
+    clearSpeed();
+    renderStudy();
+  }
   if (view === 'index') renderIndex();
   if (view === 'lab') {
+    renderCoach();
     renderLabChips();
     renderLabOutput();
   }
-  if (view === 'ledger') renderLedger();
+  if (view === 'immerse') renderImmerse();
 
   if (!options || !options.silent) announce(`${VIEW_NAMES[view]} bölümü`);
 }
@@ -1089,11 +1996,13 @@ function setView(view, options) {
 function renderAll() {
   renderMast();
   renderRail();
+  renderPath();
   renderStudy();
   renderIndex();
+  renderCoach();
   renderLabChips();
   renderLabOutput();
-  renderLedger();
+  renderImmerse();
 }
 
 /* ---------------- Oturum eylemleri ---------------- */
@@ -1111,6 +2020,7 @@ function answer(grade) {
   const card = currentCard();
   if (!card) return;
 
+  clearSpeed();
   const session = state.session;
   const next = gradeCard(card, grade);
 
@@ -1124,6 +2034,16 @@ function answer(grade) {
 
   state.flipped = false;
   state.token = null;
+
+  progress.stats.lastSession = {
+    done: session.done,
+    correct: session.correct,
+    total: session.total,
+    mode: session.mode || 'new',
+    week: Number(state.week) || card.week,
+    at: Date.now(),
+  };
+  saveProgress();
 
   announce(`${card.fi} · ${GRADE_LABELS[grade]} · sonraki tekrar ${intervalText(next, grade)}`);
   renderStudy();
@@ -1188,7 +2108,76 @@ function importBackup(file) {
   reader.readAsText(file);
 }
 
-function runAction(action) {
+function runAction(action, node) {
+  if (action === 'hub') {
+    clearSpeed();
+    state.hub = true;
+    state.summary = false;
+    setView('study', { silent: true });
+    announce('Oturum merkezi');
+    return;
+  }
+  if (action === 'hub-close') {
+    state.hub = false;
+    state.summary = false;
+    if (!state.session || (!state.session.queue.length && !state.session.done)) {
+      startSession(state.week);
+    }
+    renderStudy();
+    announce('Karta dönüldü');
+    return;
+  }
+  if (action === 'mode-new') {
+    startSession(state.week);
+    setView('study', { silent: true });
+    announce('Yeni öğrenme oturumu');
+    return;
+  }
+  if (action === 'mode-speed') {
+    startSession(state.week, { speed: true });
+    setView('study', { silent: true });
+    announce('Hızlı tekrar · kart başına 8 saniye');
+    return;
+  }
+  if (action === 'mode-hard') {
+    if (!hardPool(state.week).length) {
+      announce('Zor kelime havuzu boş; önce birkaç kart çalış');
+      return;
+    }
+    startSession(state.week, { hard: true });
+    setView('study', { silent: true });
+    announce('Zor kelimeler oturumu');
+    return;
+  }
+  if (action === 'mode-summary') {
+    clearSpeed();
+    state.hub = false;
+    state.summary = true;
+    setView('study', { silent: true });
+    announce('Oturum özeti');
+    return;
+  }
+  if (action === 'summary-close') {
+    state.summary = false;
+    renderStudy();
+    announce('Karta dönüldü');
+    return;
+  }
+  if (action === 'module') {
+    const week = node && node.dataset.week ? node.dataset.week : state.week;
+    startSession(week);
+    setView('study', { silent: true });
+    announce(`Modül ${week} oturumu`);
+    return;
+  }
+  if (action === 'level') {
+    const level = node ? levelFor(node.dataset.level) : null;
+    if (!level) return;
+    startSession(level.week, { level: level.id });
+    setView('study', { silent: true });
+    announce(`Modül ${level.week} · kademe ${level.index}`);
+    return;
+  }
   if (action === 'reveal') {
     reveal();
     return;
@@ -1215,6 +2204,118 @@ function runAction(action) {
   }
   if (action === 'reset') {
     resetProgress();
+    return;
+  }
+  if (action === 'fav') {
+    toggleFavorite(node && node.dataset.id);
+    return;
+  }
+  if (action === 'del-custom') {
+    removeCustomCard(node && node.dataset.id);
+    return;
+  }
+  if (action === 'export-custom') {
+    exportCustomCards();
+    return;
+  }
+  if (action === 'scenario') {
+    state.coach.scenario = Number(node.dataset.scenario) || 0;
+    state.coach.turn = 0;
+    state.coach.key = '';
+    renderDialog();
+    announce(`Diyalog ${state.coach.scenario + 1}`);
+    return;
+  }
+  if (action === 'scenario-next') {
+    const groups = dialogueGroups(state.week);
+    state.coach.scenario = ((state.coach.scenario || 0) + 1) % Math.max(1, groups.length);
+    state.coach.turn = 0;
+    state.coach.key = '';
+    renderDialog();
+    announce('Yeni diyalog');
+    return;
+  }
+  if (action === 'reply') {
+    const pick = Number(node.dataset.opt);
+    if (!Number.isFinite(pick)) return;
+    state.coach.picked = pick;
+    renderDialog();
+    return;
+  }
+  if (action === 'coach-next') {
+    state.coach.turn = (state.coach.turn || 0) + 1;
+    state.coach.key = '';
+    renderDialog();
+    announce('Sıradaki replik');
+    return;
+  }
+  if (action === 'coach-hint') {
+    state.coach.hint = true;
+    renderDialog();
+    return;
+  }
+  if (action === 'coach-tr') {
+    state.coach.showTr = !state.coach.showTr;
+    renderDialog();
+    return;
+  }
+  if (action === 'coach-speak') {
+    const card = dialogueGroups(state.week)[state.coach.scenario || 0];
+    const line = card && card[state.coach.turn || 0];
+    if (line) speakText(displayFi(line.fi), Number(node.dataset.rate) || 1);
+    return;
+  }
+  if (action === 'pron-speak') {
+    const card = allEntries().find((item) => item.id === state.pron.cardId);
+    if (card) speakText(displayFi(card.fi), Number(node.dataset.rate) || 1);
+    return;
+  }
+  if (action === 'pron-listen') {
+    startRecognition();
+    return;
+  }
+  if (action === 'pron-next') {
+    state.pron.index = (state.pron.index || 0) + 1;
+    state.pron.heard = '';
+    state.pron.heardOk = false;
+    renderPron();
+    return;
+  }
+  if (action === 'pron-xray') {
+    const card = allEntries().find((item) => item.id === state.pron.cardId);
+    if (!card) return;
+    state.coach.tab = 'lab';
+    state.labWord = card.fi;
+    const input = document.getElementById('labInput');
+    if (input) input.value = card.fi;
+    setView('lab', { silent: true });
+    renderLabChips();
+    renderLabOutput();
+    announce(`${card.fi} röntgende`);
+    return;
+  }
+  if (action === 'immerse-tr') {
+    state.immerse.showTr = true;
+    renderImmerse();
+    return;
+  }
+  if (action === 'immerse-next') {
+    state.immerse.index = (state.immerse.index || 0) + 1;
+    state.immerse.showTr = false;
+    renderImmerse();
+    return;
+  }
+  if (action === 'immerse-prev') {
+    state.immerse.index = Math.max(0, (state.immerse.index || 0) - 1);
+    state.immerse.showTr = false;
+    renderImmerse();
+    return;
+  }
+  if (action === 'immerse-speak') {
+    const module = moduleFor(state.week) || MODULES[0];
+    const list = poolFor(module.id).filter((card) => card.type !== 'kelime');
+    const card = list[state.immerse.index || 0];
+    if (card) speakText(displayFi(card.fi), Number(node.dataset.rate) || 1);
   }
 }
 
@@ -1269,6 +2370,21 @@ function onMainClick(event) {
     return;
   }
 
+  const filter = target.closest('[data-filter]');
+  if (filter) {
+    state.filter = filter.dataset.filter;
+    renderIndex();
+    announce(`Süzgeç: ${filter.textContent.trim()}`);
+    return;
+  }
+
+  const coachTab = target.closest('[data-coach]');
+  if (coachTab) {
+    state.coach.tab = coachTab.dataset.coach;
+    renderCoach();
+    return;
+  }
+
   const grade = target.closest('[data-grade]');
   if (grade) {
     answer(Number(grade.dataset.grade));
@@ -1276,7 +2392,7 @@ function onMainClick(event) {
   }
 
   const action = target.closest('[data-act]');
-  if (action) runAction(action.dataset.act);
+  if (action) runAction(action.dataset.act, action);
 }
 
 function onMainChange(event) {
@@ -1287,13 +2403,32 @@ function onMainChange(event) {
     const value = Math.max(4, Math.min(60, Number(target.value) || DEFAULT_GOAL));
     progress.settings.goal = value;
     saveProgress();
-    renderLedger();
+    renderPath();
     announce(`Günlük hedef ${value}`);
     return;
   }
 
   if (target.id === 'themeSelect') {
     setTheme(target.value);
+    return;
+  }
+
+  if (target.id === 'weekSelect') {
+    state.week = String(target.value);
+    state.immerse.index = 0;
+    renderHub();
+    renderRail();
+    announce(`Hafta ${target.value}`);
+    return;
+  }
+
+  if (target.id === 'immerseWeek') {
+    state.week = String(target.value);
+    state.immerse.index = 0;
+    state.immerse.showTr = false;
+    renderImmerse();
+    renderRail();
+    announce(`Hafta ${target.value} okuması`);
     return;
   }
 
@@ -1311,6 +2446,7 @@ function setTheme(theme) {
 
 function onKeyDown(event) {
   if (state.view !== 'study') return;
+  if (state.hub || state.summary) return;
   const target = event.target;
   const tag = target && target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -1363,10 +2499,21 @@ function init() {
     });
   }
 
+  const customForm = document.getElementById('customForm');
+  if (customForm) {
+    customForm.addEventListener('submit', (event) => {
+      if (event && event.preventDefault) event.preventDefault();
+      const fiInput = document.getElementById('customFi');
+      const trInput = document.getElementById('customTr');
+      addCustomCard(fiInput ? fiInput.value : '', trInput ? trInput.value : '');
+    });
+  }
+
   document.addEventListener('keydown', onKeyDown);
 
   renderMast();
   renderRail();
+  renderPath();
   renderLabChips();
   setView('study', { silent: true });
 }
@@ -1379,6 +2526,27 @@ if (typeof document !== 'undefined' && document.getElementById && document.getEl
 if (typeof globalThis !== 'undefined') {
   globalThis.SuomiKartat = {
     analyze,
+    MODULES,
+    LEVEL_SIZE,
+    GROWTH_STAGES,
+    moduleFor,
+    levelFor,
+    levelLearned,
+    levelPercent,
+    growthStage,
+    growthGlyph,
+    buildLevelQueue,
+    renderPath,
+    renderHub,
+    renderSummary,
+    renderIndex,
+    renderImmerse,
+    hardPool,
+    buildSpeedQueue,
+    dialogueGroups,
+    addCustomCard,
+    toggleFavorite,
+    VIEW_LIST,
     COLLOQUIAL,
     tokenize,
     vowelHarmony,

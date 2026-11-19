@@ -1,7 +1,8 @@
 /* Genel davranış paketi — "Morfoloji & Dil Stüdyosu" mimarisi.
 
    Kapsam: SM-2 matematiği, kök/ek çözümlemesi, kirjakieli↔puhekieli,
-   çift ses ritmi, Web Speech çağrıları ve dört görünümün çizimi.
+   çift ses ritmi, Web Speech çağrıları, beş katmanın çizimi ve
+   tek durum deposu (suomi-kartat-v2).
 
    Bağımlılıksız:  cd sanat && node tests/smoke.test.js
    Hepsi birlikte: node tests/run.js
@@ -154,6 +155,7 @@ t("boşluk cevabı açar", api.state.flipped === true && /class="grades"/.test(e
 press("4");
 const graded = api.progress.cards[mina.id];
 t("kolay puanı yazıldı", Boolean(graded) && graded.reps === 1 && graded.interval === 3, JSON.stringify(graded));
+t("tek durum v2 anahtarında", Object.keys(store).indexOf("suomi-kartat-v2") !== -1 && Object.keys(store).indexOf("suomi-kartat-v1") === -1, Object.keys(store).join(", "));
 t("duyuru", /sonraki tekrar 3 gün/.test(env.nodes["srStatus"].textContent), env.nodes["srStatus"].textContent);
 
 console.log("8) ses desteklenmeyen tarayıcı");
