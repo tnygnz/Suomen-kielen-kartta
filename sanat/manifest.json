@@ -1,20 +1,15 @@
 {
-  "name": "Suomi Sanat & Kartat",
-  "short_name": "SuomiSanat",
+  "id": "./",
+  "name": "Suomi Kartat — Günlük Fince Stüdyosu",
+  "short_name": "Suomi Kartat",
+  "description": "Fince için modern kart arayüzü, SM-2 aralıklı tekrar, ünite haritası ve kart üzerinde canlı kök–ek röntgeni.",
+  "lang": "tr",
+  "dir": "ltr",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2196F3",
-  "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
+  "orientation": "portrait-primary",
+  "background_color": "#F4F7FA",
+  "theme_color": "#F4F7FA",
+  "categories": ["education", "productivity"]
 }

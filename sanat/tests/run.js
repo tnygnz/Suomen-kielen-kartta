@@ -2,6 +2,7 @@
 
    Kullanım:  cd sanat && node tests/run.js
    Tek tek:   node tests/smoke.test.js  ·  node tests/kbd-hint.test.js
+              node tests/layers.test.js  ·  node tests/pwa.test.js
 
    Dosyalar ayrı süreçlerde koşar: her biri kendi DOM taklidini kurar, sayaçları
    ayrı kalır ve biri patlarsa diğeri yine koşar. Herhangi biri başarısızsa
@@ -10,7 +11,14 @@
 const { spawnSync } = require("child_process");
 const path = require("path");
 
-const files = ["smoke.test.js", "kbd-hint.test.js", "packs.test.js", "import.test.js"];
+const files = [
+  "smoke.test.js",
+  "kbd-hint.test.js",
+  "layers.test.js",
+  "packs.test.js",
+  "import.test.js",
+  "pwa.test.js",
+];
 let failed = 0;
 
 files.forEach(function (file) {
