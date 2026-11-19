@@ -1,15 +1,15 @@
 {
   "id": "./",
-  "name": "Suomi Kartat — Morfoloji & Dil Stüdyosu",
+  "name": "Suomi Kartat — Günlük Fince Stüdyosu",
   "short_name": "Suomi Kartat",
-  "description": "Fince için editoryal arayüzlü, SM-2 aralıklı tekrar ve kart üzerinde canlı kök–ek röntgeni.",
+  "description": "Fince için modern kart arayüzü, SM-2 aralıklı tekrar, ünite haritası ve kart üzerinde canlı kök–ek röntgeni.",
   "lang": "tr",
   "dir": "ltr",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#F7F5F0",
-  "theme_color": "#F7F5F0",
+  "background_color": "#F4F7FA",
+  "theme_color": "#F4F7FA",
   "categories": ["education", "productivity"]
 }

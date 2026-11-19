@@ -1,7 +1,7 @@
 /* PWA paketi: manifest.json, sw.js ve index.html bağlantıları.
 
    Denetlenenler:
-     - manifest geçerli JSON, ad/kapsam/standalone ve #F7F5F0 renkleri,
+     - manifest geçerli JSON, ad/kapsam/standalone ve #F4F7FA renkleri,
      - simge referansları varsa diskte gerçekten var,
      - sw.js sürümlü önbellek adı kullanıyor, eski ad kalmamış,
      - önbellek listesindeki her yol diskte mevcut,
@@ -32,8 +32,8 @@ if (manifest) {
   t("kapsam ve başlangıç", manifest.start_url === "./index.html" && manifest.scope === "./");
   t("standalone", manifest.display === "standalone");
   t("dil tr", manifest.lang === "tr");
-  t("tema rengi #F7F5F0", String(manifest.theme_color).toUpperCase() === "#F7F5F0", manifest.theme_color);
-  t("arka plan #F7F5F0", String(manifest.background_color).toUpperCase() === "#F7F5F0", manifest.background_color);
+  t("tema rengi #F4F7FA", String(manifest.theme_color).toUpperCase() === "#F4F7FA", manifest.theme_color);
+  t("arka plan #F4F7FA", String(manifest.background_color).toUpperCase() === "#F4F7FA", manifest.background_color);
   const icons = Array.isArray(manifest.icons) ? manifest.icons : [];
   const missingIcons = icons.filter((icon) => !fs.existsSync(path.join(root, icon.src)));
   t("eksik simge referansı yok", missingIcons.length === 0, missingIcons.map((i) => i.src).join(", ") || "simge yok");
@@ -59,8 +59,17 @@ console.log("3) index.html bağlantısı");
 const html = read("index.html");
 t("manifest bağlı", /rel="manifest" href="manifest.json"/.test(html));
 t("sw kaydı var", /serviceWorker\.register\('sw\.js'\)/.test(html));
-t("tema rengi meta #F7F5F0", /name="theme-color" content="#F7F5F0"/i.test(html));
+t("tema rengi meta #F4F7FA", /name="theme-color" content="#F4F7FA"/i.test(html));
 t("fontlar önbellekte", core.indexOf("./fonts/fraunces.woff2") !== -1 && core.indexOf("./fonts/inter.woff2") !== -1);
+
+console.log("4) Busuu görsel dili");
+const css = read("styles.css");
+t("ferah gri-mavi zemin ve beyaz kart", /--bg:\s*#f4f7fa/i.test(css) && /--surface:\s*#ffffff/i.test(css));
+t("kobalt mavi, turuncu ve başarı yeşili", /--primary:\s*#1a73e8/i.test(css) && /--accent:\s*#ff7a00/i.test(css) && /--success:\s*#16a34a/i.test(css));
+t("gece mavisi karanlık mod", /--bg:\s*#0b1120/i.test(css) && /--surface:\s*#151f32/i.test(css));
+t("16px kart yarıçapı ve hap butonlar", /--radius:\s*16px/.test(css) && /--pill:\s*999px/.test(css));
+t("yumuşak kart gölgesi", /0 4px 14px rgba\(15, 23, 42, 0\.06\)/.test(css));
+t("modern sans-serif (Fraunces başlık yok)", /@font-face\s*{[^}]*Inter/s.test(css) && !/font-family:\s*"Fraunces"/.test(css));
 
 console.log("\nSONUC: " + pass + " gecti, " + fail + " basarisiz");
 process.exit(fail ? 1 : 0);

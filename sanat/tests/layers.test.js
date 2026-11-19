@@ -95,12 +95,27 @@ t("Yolculuk: seri halkası + haftalık çizgi", /class="streak-ring"/.test(html)
 t("Yolculuk: 16 modül, 68 kademe",
   (html.match(/class="module"/g) || []).length === 16 &&
   (html.match(/data-act="level"/g) || []).length === 68);
+t("Yolculuk: Busuu ünite kapağı ve yüzde barı",
+  (html.match(/class="unit-cover unit-cover--/g) || []).length === 16 &&
+  (html.match(/class="unit-bar"/g) || []).length === 16 &&
+  /Çevrimdışı İndir/.test(html));
+t("Yolculuk: ünite başına dört ders adımı",
+  (html.match(/data-act="unit-step"/g) || []).length === 64 &&
+  /Dilbilgisi Röntgeni/.test(html) && /Ünite Sınavı/.test(html));
 
 api.state.hub = true;
 api.setView("study", { silent: true });
 html = env.nodes["view-study"].innerHTML;
 t("Oturum: dört mod kartı", (html.match(/class="mode-card"/g) || []).length === 4);
 api.state.hub = false;
+api.setView("study", { silent: true });
+html = env.nodes["view-study"].innerHTML;
+t("Oturum: Busuu ders kartı ve hap sekmeler",
+  /class="lesson-card"/.test(html) && /class="card-tabs"/.test(html) &&
+  /data-act="xray-card"/.test(html) && /Morfoloji Röntgeni/.test(html));
+t("Oturum: kart üzerinde iki kayıt ve iki dinleme hapı",
+  (html.match(/data-register=/g) || []).length === 2 &&
+  (html.match(/data-speak=/g) || []).length === 2);
 
 t("Oturum: hızlı kuyruk 10 kart", api.buildSpeedQueue("1").length === 10, String(api.buildSpeedQueue("1").length));
 api.gradeCard(api.poolFor("1")[1], 0, 1000);
@@ -132,6 +147,9 @@ t("Dalma: sekiz cümle noktası", (html.match(/class="reading-dot[ "]/g) || []).
 
 const shell = fs.readFileSync(path.join(root, "index.html"), "utf8");
 t("Kabuk: beş sekme", (shell.match(/data-tab=/g) || []).length === 5);
+t("Kabuk: Busuu üst barı (seviye, seri, çevrimdışı, hedef)",
+  /Suomi A1–A2/.test(shell) && /id="mastStreak"/.test(shell) &&
+  /id="offlineState"/.test(shell) && /id="goalRing"/.test(shell));
 t("Kabuk: Dalma paneli var", /id="view-immerse"/.test(shell) && !/view-ledger/.test(shell));
 t("VIEW_LIST beş katman", JSON.stringify(api.VIEW_LIST) === JSON.stringify(["path", "study", "index", "lab", "immerse"]));
 

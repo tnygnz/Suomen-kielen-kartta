@@ -15,7 +15,7 @@ const SESSION_LIMIT = 30;
 const NEW_CARD_LIMIT = 12;
 const DEFAULT_GOAL = 20;
 const GRADE_LABELS = ['Tekrar', 'Zor', 'İyi', 'Kolay'];
-const THEMES = { linen: 'Sıcak Keten', fjord: 'Gece Fiyordu' };
+const THEMES = { linen: 'Aydınlık', fjord: 'Gece Modu' };
 const REGISTERS = { kirja: 'Kirjakieli', puhe: 'Puhekieli' };
 const VIEW_NAMES = { path: 'Yolculuk', study: 'Oturum', index: 'Sözlük', lab: 'AI Koç', immerse: 'Dalma' };
 const VIEW_LIST = ['path', 'study', 'index', 'lab', 'immerse'];
@@ -953,6 +953,21 @@ function startSession(week, options) {
 
 /* ---------------- Çizim ---------------- */
 
+/* Ünite adımlarının dairesel ikonları; yalnızca görsel, veriye dokunmaz. */
+const STEP_ICONS = {
+  words:
+    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H11v14H6.5A2.5 2.5 0 0 0 4 20.5Z"/><path d="M20 6.5A2.5 2.5 0 0 0 17.5 4H13v14h4.5A2.5 2.5 0 0 1 20 20.5Z"/></svg>',
+  dialog:
+    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v10H9l-5 4.5V5Z"/><path d="M8 9h6M8 12h4"/></svg>',
+  grammar:
+    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h6M7 6v12M14 6h6M17 6v12M10 12h7"/></svg>',
+  quiz:
+    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0Z"/><path d="M8 6H5v2a3 3 0 0 0 3 3M16 6h3v2a3 3 0 0 1-3 3M12 12v5M8 20h8"/></svg>',
+};
+
+const CHEVRON_ICON =
+  '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+
 function renderMast() {
   const theme = progress.settings.theme === 'fjord' ? 'fjord' : 'linen';
   document.body.dataset.theme = theme;
@@ -960,13 +975,33 @@ function renderMast() {
   const streak = document.getElementById('mastStreak');
   if (streak) {
     const days = currentStreak();
-    streak.textContent = days > 0 ? `seri ${days} gün` : 'seri —';
+    streak.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c3 3.6 5.5 6.2 5.5 9.6A5.5 5.5 0 0 1 12 18a5.5 5.5 0 0 1-5.5-5.4C6.5 9.2 9 6.6 12 3Z"/><path d="M12 18c-1.7 0-3-1.2-3-2.9 0-1.6 1.2-2.7 2.4-4.1.3 1.7 1.4 2 2 2.9.5.7.6 1.2.6 1.7 0 1.4-1 2.4-2 2.4Z"/></svg><b>${days}</b><i>gün</i>`;
+    streak.setAttribute('aria-label', `Günlük seri: ${days} gün`);
+  }
+
+  const offline = document.getElementById('offlineState');
+  if (offline) {
+    const ready = typeof navigator !== 'undefined' && Boolean(navigator.serviceWorker);
+    offline.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg><span>${ready ? 'Çevrimdışı · Hazır' : 'Çevrimdışı · Kapalı'}</span>`;
+    offline.classList.toggle('is-ready', Boolean(ready));
+  }
+
+  const goalRing = document.getElementById('goalRing');
+  if (goalRing) {
+    const goal = Math.max(1, Math.round(progress.settings.goal || DEFAULT_GOAL));
+    const today = Math.min(todayCount(), goal);
+    const ratio = Math.max(0, Math.min(1, today / goal));
+    goalRing.innerHTML = `<svg viewBox="0 0 36 36" aria-hidden="true"><circle class="goal-ring-track" cx="18" cy="18" r="15.9155" pathLength="100"></circle><circle class="goal-ring-fill" cx="18" cy="18" r="15.9155" pathLength="100" stroke-dasharray="${(ratio * 100).toFixed(1)} 100"></circle></svg><span class="goal-ring-text"><b>${today}</b><i>/${goal}</i></span>`;
+    goalRing.setAttribute('aria-label', `Günlük hedef: ${today} / ${goal} kart`);
   }
 
   const toggle = document.getElementById('themeToggle');
   if (toggle) {
-    toggle.textContent = theme === 'fjord' ? THEMES.linen : THEMES.fjord;
     toggle.setAttribute('aria-pressed', String(theme === 'fjord'));
+    toggle.setAttribute(
+      'aria-label',
+      theme === 'fjord' ? 'Aydınlık moda geç' : 'Gece moduna geç',
+    );
   }
 }
 
@@ -1154,6 +1189,13 @@ function renderStudy() {
       </div>`
     : '';
 
+  const speed =
+    session.mode === 'speed'
+      ? '<div class="speed"><div class="speed-bar" id="speedBar"><span></span></div><span class="speed-label" id="speedLabel">8 sn</span></div>'
+      : '';
+  const xrayActive = Boolean(state.token);
+  const xrayPill = `<button type="button" class="pill${xrayActive ? ' is-on' : ''}" data-act="xray-card" aria-pressed="${xrayActive}" aria-label="Morfoloji röntgenini aç">Morfoloji Röntgeni</button>`;
+
   const grades = [0, 1, 2, 3]
     .map((grade) => {
       const ghost = nextState(cardState(card.id), grade);
@@ -1166,39 +1208,42 @@ function renderStudy() {
     .join('');
 
   el.innerHTML = `<article class="focus">
-    <p class="eyebrow"><span class="eyebrow-mark">${growthGlyph(module ? growthStage(module) : 0)}</span><span>Modül ${pad2(
-      card.week,
-    )}${module ? ` · ${esc(module.title)}` : ''}</span><span>${pad2(session.done + 1)} / ${pad2(
-      total,
-    )}</span></p>
-    <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
-      percent,
-    )}"><span style="width:${percent.toFixed(1)}%"></span></div>
-    <div class="session-bar">
-      <button class="link-btn" type="button" data-act="hub">Oturum merkezi · 4 mod</button>
-      <span class="session-mode">${modeLabel(session)}</span>
+    <div class="lesson-top">
+      <button class="icon-btn" type="button" data-act="hub" aria-label="Oturum merkezi">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
+        percent,
+      )}"><span style="width:${percent.toFixed(1)}%"></span></div>
+      <span class="lesson-count">${pad2(session.done + 1)} / ${pad2(total)}</span>
     </div>
-    ${
-      session.mode === 'speed'
-        ? '<div class="speed"><div class="speed-bar" id="speedBar"><span></span></div><span class="speed-label" id="speedLabel">8 sn</span></div>'
-        : ''
-    }
-    ${registerSwitch}
-    ${level ? ladderHtml(level, session) : ''}
-    <p class="prompt">${prompt}</p>
-    ${rhythmHtml(shown)}
-    ${listen}
-    <p class="hint">Kelimeye dokun · kök ve ek röntgeni</p>
-    ${
-      state.flipped
-        ? answerHtml(card)
-        : '<button type="button" class="btn btn--primary reveal" data-act="reveal">Anlamı göster</button>'
-    }
-    ${state.flipped ? `<div class="grades" role="group" aria-label="Kendini puanla">${grades}</div>` : ''}
-  </article>
-  <div class="xray-slot" id="xraySlot">${
-    state.token ? xrayHtml(analyze(state.token)) : xrayHtml(null)
-  }</div>`;
+    <div class="session-bar">
+      <span class="session-mode">${modeLabel(session)}</span>
+      <button class="link-btn" type="button" data-act="hub">Oturum merkezi · 4 mod</button>
+    </div>
+    ${speed}
+    <section class="lesson-card" aria-label="Ders kartı">
+      <p class="eyebrow"><span class="eyebrow-mark">${growthGlyph(
+        module ? growthStage(module) : 0,
+      )}</span><span>Ünite ${pad2(card.week)}${module ? ` · ${esc(module.title)}` : ''}</span></p>
+      <div class="card-tabs">
+        ${registerSwitch}
+        ${listen}
+        ${xrayPill}
+      </div>
+      ${level ? ladderHtml(level, session) : ''}
+      <p class="prompt">${prompt}</p>
+      ${rhythmHtml(shown)}
+      <p class="hint">Kelimeye dokun · kök ve ek röntgeni</p>
+      ${
+        state.flipped
+          ? answerHtml(card)
+          : '<button type="button" class="btn btn--primary reveal" data-act="reveal">Anlamı göster</button>'
+      }
+      ${state.flipped ? `<div class="grades" role="group" aria-label="Kendini puanla">${grades}</div>` : ''}
+    </section>
+    <div class="xray-slot" id="xraySlot">${state.token ? xrayHtml(analyze(state.token)) : ''}</div>
+  </article>`;
   armSpeed();
 }
 
@@ -1392,6 +1437,8 @@ function ladderHtml(level, session) {
 function moduleHtml(module) {
   const learned = module.cards.filter((card) => cardState(card.id).reps > 0).length;
   const due = dueCount(module.id);
+  const percent = module.cards.length ? Math.round((learned / module.cards.length) * 100) : 0;
+  const words = module.cards.filter((card) => card.type === 'kelime').length;
 
   const levels = module.levels
     .map(
@@ -1405,20 +1452,47 @@ function moduleHtml(module) {
     )
     .join('');
 
+  const steps = [
+    { key: 'words', label: 'Kelimeler', note: `${words || module.cards.length} kart · yeni kelimeler` },
+    { key: 'dialog', label: 'Diyalog', note: 'Koçla iki replik' },
+    { key: 'grammar', label: 'Dilbilgisi Röntgeni', note: 'Kök–ek çözümlemesi' },
+    { key: 'quiz', label: 'Ünite Sınavı', note: '8 saniyelik hızlı tur' },
+  ]
+    .map(
+      (step, index) => `<li>
+        <button type="button" class="unit-step" data-act="unit-step" data-step="${step.key}" data-unit="${module.id}" aria-label="Ünite ${module.id}, ${step.label}">
+          <span class="step-icon step-icon--${step.key}">${STEP_ICONS[step.key]}</span>
+          <span class="step-text"><b>${index + 1}. ${step.label}</b><i>${step.note}</i></span>
+          <span class="step-arrow">${CHEVRON_ICON}</span>
+        </button>
+      </li>`,
+    )
+    .join('');
+
   return `<li class="module">
-    <div class="module-head">
-      <span class="module-mark">${growthGlyph(growthStage(module))}</span>
-      <span class="module-num">${pad2(module.id)}</span>
-      <span class="module-body">
+    <div class="unit-cover unit-cover--${module.id % 5}">
+      <p class="unit-eyebrow"><span>Ünite ${pad2(module.id)} · Hafta ${pad2(module.id)}</span><span>${module.cards.length} kart</span></p>
+      <div class="module-head">
         <span class="module-title">${esc(module.title)}</span>
         <span class="module-focus">${esc(module.focus)}</span>
-      </span>
-      <span class="module-count"><b>${learned}</b><i>/${module.cards.length}</i></span>
+      </div>
+      <div class="unit-cover-meta">
+        <span class="unit-percent">%${percent}</span>
+        <span class="unit-bar"><span style="width:${percent}%"></span></span>
+        <span class="unit-offline"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg>Çevrimdışı İndir</span>
+      </div>
     </div>
-    <div class="module-levels">${levels}</div>
-    <div class="module-foot">
-      <button class="btn btn--primary btn--tight" type="button" data-act="module" data-week="${module.id}">Modülü çalış</button>
-      <span class="module-due">${due ? `${due} tekrar hazır` : 'tekrar yok'} · ${module.levels.length} kademe</span>
+    <div class="unit-body">
+      <p class="unit-steps-label">Ders adımları</p>
+      <ol class="unit-steps">${steps}</ol>
+      <details class="unit-levels">
+        <summary>Kademeler · ${module.levels.length}</summary>
+        <div class="module-levels">${levels}</div>
+      </details>
+      <div class="module-foot">
+        <button class="btn btn--primary btn--tight" type="button" data-act="module" data-week="${module.id}">Üniteye başla</button>
+        <span class="module-due">${due ? `${due} tekrar hazır` : 'tekrar yok'} · ${module.levels.length} kademe</span>
+      </div>
     </div>
   </li>`;
 }
@@ -1437,9 +1511,9 @@ function renderPath() {
   const accuracy = answers ? Math.round((correct / answers) * 100) : 0;
 
   el.innerHTML = `<div class="path-head">
-      <p class="kicker">${markGlyph()}<span>01 · Yolculuk</span></p>
+      <p class="kicker">${markGlyph()}<span>Ünite haritası</span></p>
       <h1 class="view-title">Yolculuk</h1>
-      <p class="lede">On altı modül; her modül beş kartlık kademelere bölünür. Kademe, kartlar oturdukça tohumdan çiçeğe açılır. Sıra ve tarih SM-2'nin kendi takviminde kalır.</p>
+      <p class="lede">16 ünite, 68 kademe. Her ünitede kelimeler, diyalog, dilbilgisi röntgeni ve ünite sınavı; ilerleme SM-2 takvimine bağlı kalır.</p>
       <div class="journey-top">
         ${streakRingHtml()}
         <div class="journey-side">
@@ -2178,6 +2252,48 @@ function runAction(action, node) {
     announce(`Modül ${level.week} · kademe ${level.index}`);
     return;
   }
+  if (action === 'unit-step') {
+    const week = node && node.dataset.unit ? node.dataset.unit : state.week;
+    const step = node && node.dataset.step;
+    state.week = String(week);
+    if (step === 'dialog') {
+      state.coach.tab = 'dialog';
+      state.coach.turn = 0;
+      state.coach.key = '';
+      setView('lab', { silent: true });
+      announce(`Ünite ${week} diyaloğu`);
+      return;
+    }
+    if (step === 'grammar') {
+      state.coach.tab = 'lab';
+      state.labWord = '';
+      setView('lab', { silent: true });
+      announce(`Ünite ${week} dilbilgisi röntgeni`);
+      return;
+    }
+    if (step === 'quiz') {
+      startSession(week, { speed: true });
+      setView('study', { silent: true });
+      announce(`Ünite ${week} sınavı · hızlı tur`);
+      return;
+    }
+    startSession(week);
+    setView('study', { silent: true });
+    announce(`Ünite ${week} kelimeleri`);
+    return;
+  }
+  if (action === 'xray-card') {
+    const card = currentCard();
+    if (!card) return;
+    if (state.token) {
+      state.token = null;
+    } else {
+      state.token = (String(displayFi(card.fi)).match(/\p{L}+/u) || [])[0] || null;
+    }
+    renderStudy();
+    announce(state.token ? `${state.token} röntgende` : 'Röntgen kapandı');
+    return;
+  }
   if (action === 'reveal') {
     reveal();
     return;
@@ -2481,6 +2597,11 @@ function init() {
     toggle.addEventListener('click', () => {
       setTheme(progress.settings.theme === 'fjord' ? 'linen' : 'fjord');
     });
+  }
+
+  const goalRing = document.getElementById('goalRing');
+  if (goalRing) {
+    goalRing.addEventListener('click', () => setView('path'));
   }
 
   const search = document.getElementById('searchInput');
