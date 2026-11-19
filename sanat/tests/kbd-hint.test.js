@@ -1,9 +1,14 @@
-/* Klavye ipucu testleri: oturum ekranındaki tek satırlık ipucu moda göre
-   ve cevap durumuna göre doğru değişiyor mu?
+/* Klavye paketi: oturum ekranının tek Enter/boşluk + 1-4 akışı.
+
+   Denetlenenler:
+     - boşluk cevabı açar, puanlama düğmeleri çıkar,
+     - cevap açılmadan rakam puan yazmaz,
+     - 1-4 tuşları SM-2'ye yazar (4 → kolay, 3 gün),
+     - girdi alanında ve düğme üzerinde kısayol çalışmaz,
+     - puanlamadan sonra yeni kart kapalı gelir.
 
    Bağımlılıksız:  cd sanat && node tests/kbd-hint.test.js
-   Gerçek tarayıcı yok; data.js + app.js küçük bir DOM taklidiyle yüklenir ve
-   üretilen HTML'deki <p class="kbd-hint"> metni denetlenir. */
+   Hepsi birlikte: node tests/run.js */
 
 const fs = require("fs");
 const path = require("path");
@@ -12,119 +17,87 @@ const root = path.join(__dirname, "..");
 const src = fs.readFileSync(path.join(root, "data.js"), "utf8") + "\n" +
             fs.readFileSync(path.join(root, "app.js"), "utf8");
 
-/* Sabit "bugün": tarihe bağlı ekranlar testte kaymasın. */
-const RealDate = Date;
-class FakeDate extends RealDate {
-  constructor(...a) { if (a.length === 0) super(RealDate.now()); else super(...a); }
-  static now() { return RealDate.now(); }
-}
-global.Date = FakeDate;
-
-const store = {};
-global.localStorage = {
-  getItem: k => (k in store ? store[k] : null),
-  setItem: (k, v) => { store[k] = v; },
-  removeItem: k => { delete store[k]; }
-};
-global.setTimeout = () => 1;
-global.clearTimeout = () => {};
-global.setInterval = () => 1;
+let store = {};
+let keydown = null;
 
 function boot() {
+  store = {};
+  keydown = null;
+  global.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
+  };
+  const nodes = {};
   const handlers = {};
-
-  function el(id) {
-    return {
-      id, innerHTML: "", textContent: "", value: "", offsetWidth: 1,
-      classList: { add() {}, remove() {}, toggle() {} },
-      addEventListener(type, fn) { handlers[id + ":" + type] = fn; },
-      appendChild() {}, removeChild() {},
-      querySelector() { return null; }, querySelectorAll() { return []; },
-      getAttribute() { return null; }, setAttribute() {},
-      focus() {}, click() {}, style: {}
-    };
-  }
-
-  /* Aynı id her çağrıda aynı düğümü döndürür: typeInput değeri korunur. */
-  const nodes = { app: el("app"), toast: el("toast"), streakDays: el("streakDays"), tabs: el("tabs") };
-  global.document = {
-    getElementById: id => nodes[id] || (nodes[id] = el(id)),
-    querySelector: () => null, querySelectorAll: () => [],
-    createElement: () => el("tmp"), body: el("body"), hidden: false,
-    addEventListener() {}
-  };
-
-  function FakeSR() {}
-  FakeSR.prototype.start = function () {
-    this.onresult({ results: [[{ transcript: "" }]] });
-  };
-  FakeSR.prototype.abort = function () {};
-  global.window = { scrollTo() {}, SpeechRecognition: FakeSR, addEventListener() {} };
-  global.confirm = () => true;
-
-  new Function(src)();
-
-  const target = (sels, val) => ({
-    closest: s => (sels.indexOf(s) !== -1 ? { getAttribute: () => val } : null)
+  const el = (id) => ({
+    id, innerHTML: "", textContent: "", value: "", hidden: false, style: {}, dataset: {}, files: [],
+    tagName: "DIV",
+    addEventListener(type, fn) { handlers[id + ":" + type] = fn; },
+    setAttribute() {}, removeAttribute() {}, appendChild() {}, remove() {}, click() {},
+    closest() { return null; },
+    classList: { add() {}, remove() {}, toggle() {} },
   });
-
-  return {
-    app: nodes.app,
-    fire(sels, val, which) {
-      if (typeof sels === "string") sels = [sels];
-      (which ? handlers[which] : handlers["app:click"])({ target: target(sels, val) });
-    },
-    input: id => nodes[id] || (nodes[id] = el(id))
+  global.document = {
+    getElementById(id) { if (!nodes[id]) nodes[id] = el(id); return nodes[id]; },
+    querySelectorAll() { return []; },
+    addEventListener(type, fn) { if (type === "keydown") keydown = fn; },
+    createElement() { return el("tmp"); },
+    body: el("body"),
   };
+  global.window = {};
+  const api = new Function(src + "\nreturn globalThis.SuomiKartat;")();
+  return { api, nodes };
 }
 
-const hint = html => (html.match(/<p class="kbd-hint">([\s\S]*?)<\/p>/) || [])[1] || "";
+const press = (key, target) => keydown({
+  key,
+  target: target || { tagName: "BODY", closest() { return null; } },
+  preventDefault() {},
+});
 
 let pass = 0, fail = 0;
-function check(label, actual, expected) {
-  const good = actual === expected;
-  if (good) pass++; else fail++;
-  console.log((good ? "  [OK]  " : "  [FAIL] ") + label + " -> " + (actual || "(ipucu yok)"));
-  if (!good) console.log("          beklenen -> " + expected);
+function t(label, cond, extra) {
+  if (cond) { pass++; console.log("  [OK]  " + label + (extra ? " -> " + extra : "")); }
+  else { fail++; console.log("  [FAIL] " + label + (extra ? " -> " + extra : "")); }
 }
 
-const KART_KAPALI = '<kbd>Tab</kbd> Cevabı göster · <kbd>Enter</kbd> düğmeyi açar';
-const PUANLA = '<kbd>Tab</kbd> puanla · <kbd>Enter</kbd> onayla';
-const TEST = '<kbd>Tab</kbd> seçenekler · <kbd>Enter</kbd> seç';
-const SONRAKI = '<kbd>Enter</kbd> sonraki kart';
-const YAZ = '<kbd>Enter</kbd> cevabı kontrol et · <kbd>Tab</kbd> ile gezin';
+const env = boot();
+const api = env.api;
+const cardId = api.state.session.queue[0].id;
 
-console.log("1) kart: kapalı → açık → puanlandı");
-let s = boot();
-s.fire(["[data-mode]"], "kart");
-check("kart kapalı", hint(s.app.innerHTML), KART_KAPALI);
-s.fire(["[data-action]"], "reveal");
-check("kart açık", hint(s.app.innerHTML), PUANLA);
-s.fire(["[data-grade]"], "2");
-check("yeni kart", hint(s.app.innerHTML), KART_KAPALI);
+console.log("1) cevap açılmadan puan yok");
+press("3");
+t("rakam yok sayılır", api.state.flipped === false && !api.progress.cards[cardId]);
+t("puanlama düğmesi çizilmedi", !/data-grade=/.test(env.nodes["view-study"].innerHTML));
 
-console.log("2) test: cevap bekliyor → cevaplandı");
-s = boot();
-s.fire(["[data-mode]"], "test");
-check("test cevap bekliyor", hint(s.app.innerHTML), TEST);
-const opt = (s.app.innerHTML.match(/data-opt="([^"]+)"/) || [])[1];
-s.fire(["[data-opt]"], opt || "");
-check("test cevaplandı", hint(s.app.innerHTML), SONRAKI);
+console.log("2) boşluk cevabı açar");
+press(" ");
+t("cevap açık", api.state.flipped === true);
+t("dört puanlama düğmesi", (env.nodes["view-study"].innerHTML.match(/data-grade=/g) || []).length === 4);
 
-console.log("3) yazma: boş → cevaplandı");
-s = boot();
-s.fire(["[data-mode]"], "yaz");
-check("yazma boş", hint(s.app.innerHTML), YAZ);
-s.input("typeInput").value = "zzz";
-s.fire(["[data-action]"], "check");
-check("yazma cevaplandı", hint(s.app.innerHTML), SONRAKI);
+console.log("3) klavye puanı SM-2'ye yazar");
+press("4");
+const state4 = api.progress.cards[cardId];
+t("kolay: 3 gün", Boolean(state4) && state4.interval === 3 && state4.reps === 1, JSON.stringify(state4));
+t("sonraki kart kapalı", api.state.flipped === false);
+t("oturum sayacı", api.state.session.done === 1 && api.state.session.correct === 1);
+t("duyuru tek satır", /sonraki tekrar 3 gün/.test(env.nodes["srStatus"].textContent));
 
-console.log("4) telaffuz: puanlama açık → dinlendi");
-s = boot();
-s.fire(["[data-mode]"], "telaffuz");
-check("telaffuz puanlama", hint(s.app.innerHTML), PUANLA);
-s.fire(["[data-action]"], "listen");
-check("telaffuz dinlendi", hint(s.app.innerHTML), SONRAKI);
+console.log("4) odağa göre kısayol susar");
+press(" ", { tagName: "INPUT", closest() { return null; } });
+t("girdi alanında boşluk açmaz", api.state.flipped === false);
+press(" ", { tagName: "BUTTON", closest() { return {}; } });
+t("düğme üzerinde boşluk açmaz", api.state.flipped === false);
+
+console.log("5) ikinci kart: Enter ve rakam");
+press("Enter");
+t("Enter cevabı açar", api.state.flipped === true);
+const nextId = api.state.session.queue[0].id;
+press("2");
+const state2 = api.progress.cards[nextId];
+t("zor puanı: aralık 1 gün", Boolean(state2) && state2.interval === 1 && state2.reps === 1, JSON.stringify(state2));
+t("zor puanı da doğru sayılır (yalnız Tekrar yanlış)", api.state.session.correct === 2, String(api.state.session.correct));
 
 console.log("\nSONUC: " + pass + " gecti, " + fail + " basarisiz");
 process.exit(fail ? 1 : 0);
